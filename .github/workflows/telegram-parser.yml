@@ -17,3 +17,4 @@ jobs:
             python3 -c "import json; html=open('/tmp/tg.html').read(); open('/tmp/payload.json','w').write(json.dumps({'channel':'$channel','html':html}))"
             curl -s -X POST "http://85.239.61.157:5678/webhook/telegram-parser" -H "Content-Type: application/json" -d @/tmp/payload.json
             sleep 3
+          done
