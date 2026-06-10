@@ -13,15 +13,20 @@ jobs:
         run: |
           for channel in CRERussia officenewsdaily nedvirf arendator_ru; do
             echo "Parsing $channel..."
-            response=$(curl -s "https://t.me/s/$channel" \
+            curl -s "https://t.me/s/$channel" \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -H "Accept: text/html,application/xhtml+xml" \
-              -H "Accept-Language: ru-RU,ru;q=0.9" \
-              --compressed)
-
+              -H "Accept: text/html" \
+              --compressed > /tmp/tg_${channel}.html
+            
+            python3 -c "
+import json
+html = open('/tmp/tg_${channel}.html').read()
+data = json.dumps({'channel': '${channel}', 'html': html})
+open('/tmp/payload_${channel}.json', 'w').write(data)
+"
             curl -s -X POST "http://85.239.61.157:5678/webhook/telegram-parser" \
               -H "Content-Type: application/json" \
-              -d "{\"channel\": \"$channel\", \"html\": $(echo "$response" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}"
-
+              -d @/tmp/payload_${channel}.json
+            
             sleep 3
           done
