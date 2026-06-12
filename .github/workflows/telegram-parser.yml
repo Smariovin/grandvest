@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Parse Telegram channels
         run: |
-          for channel in CRERussia officenewsdaily nedvirf arendator_ru; do
+          for channel in CRERussia officenewsdaily nedvirf arendator_ru pravonadom1 rusipoteka ria_realty Commers_Estate; do
             echo "Parsing $channel..."
             curl -s "https://t.me/s/$channel" -H "User-Agent: Mozilla/5.0" --compressed > /tmp/tg.html
             python3 -c "import json; html=open('/tmp/tg.html').read(); open('/tmp/payload.json','w').write(json.dumps({'channel':'$channel','html':html}))"
