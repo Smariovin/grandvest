@@ -1,0 +1,29 @@
+name: Telegram Publisher
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Post text'
+        required: true
+      image_url:
+        description: 'Image URL'
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send to Telegram
+        run: |
+          if [ -n "${{ github.event.inputs.image_url }}" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto" \
+              -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+              -d "photo=${{ github.event.inputs.image_url }}" \
+              --data-urlencode "caption=${{ github.event.inputs.message }}" \
+              -d "parse_mode=HTML"
+          else
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+              --data-urlencode "text=${{ github.event.inputs.message }}" \
+              -d "parse_mode=HTML"
+          fi
