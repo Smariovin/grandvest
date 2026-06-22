@@ -1,0 +1,124 @@
+name: Auto Fix & Test Grandvest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6,15 * * 1-5'
+
+jobs:
+  fix-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Connect and fix
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 85.239.61.157
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            echo "=== START AUTO FIX ==="
+
+            # 1. Проверить n8n
+            if ! curl -s http://localhost:5678/healthz > /dev/null; then
+              docker start n8n
+              sleep 10
+              echo "n8n restarted"
+            else
+              echo "n8n OK"
+            fi
+
+            # 2. Исправить все ссылки на старые имена узлов
+            python3 << 'PYEOF'
+            import sqlite3, json
+
+            DB = "/opt/n8n/n8n_data/database.sqlite"
+            con = sqlite3.connect(DB)
+            cur = con.cursor()
+
+            wf = cur.execute('SELECT id,nodes FROM workflow_entity WHERE name LIKE "%Парсер%"').fetchone()
+            if not wf:
+                print("Parser workflow not found!")
+                exit(1)
+
+            nodes = json.loads(wf[1])
+
+            FIXES = {
+                "Code in JavaScript1": "2. Дедупликация входящих",
+                "Code in JavaScript2": "6. Извлечение текста поста",
+                "Code in JavaScript3": "9. Отправка в Telegram",
+                "Code in JavaScript4": "10. Запись в дедупликацию",
+            }
+
+            changed = False
+            for n in nodes:
+                code = n.get("parameters", {}).get("jsCode", "")
+                if not code:
+                    continue
+                old = code
+                for old_name, new_name in FIXES.items():
+                    code = code.replace("$('" + old_name + "')", "('" + new_name + "')")
+                    code = code.replace('("' + old_name + '")', '("' + new_name + '")')
+                if ".all()" in code and "Подготовка" in code:
+                    code = code.replace("'8. Подготовка данных поста').all()", "'Code — фильтр оценки').first()")
+                    code = code.replace('"8. Подготовка данных поста").all()', '"Code — фильтр оценки").first()')
+                if code != old:
+                    n["parameters"]["jsCode"] = code
+                    print("Fixed: " + n["name"])
+                    changed = True
+
+            if changed:
+                cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?",
+                    (json.dumps(nodes, ensure_ascii=False), wf[0]))
+                con.commit()
+                print("Saved to DB")
+
+            con.close()
+            PYEOF
+
+            # 3. Перезапустить n8n чтобы применить изменения
+            docker restart n8n
+            sleep 15
+            echo "n8n restarted after fixes"
+
+            # 4. Сбросить дедупликацию если нужно
+            if [ $(cat /data/published_titles.json | python3 -c "import sys,json; print(len(json.load(sys.stdin)))") -gt 390 ]; then
+              echo "[]" > /data/published_titles.json
+              echo "Dedup cache cleared"
+            fi
+
+            # 5. Тестовый запрос
+            sleep 5
+            RESULT=$(curl -s -X POST "http://localhost:5678/webhook/telegram-parser" \
+              -H "Content-Type: application/json" \
+              -d '{"channel":"arendator_ru","html":"<div class=\"tgme_widget_message_text js-message_text\">Офисная недвижимость Москвы: вакантность офисов упала до рекордных 5%, аналитики прогнозируют рост аренды на 20% в 2026 году</div>"}')
+            echo "Webhook response: $RESULT"
+
+            echo "=== FIX COMPLETE ==="
+
+      - name: Wait and check GitHub Actions
+        run: |
+          echo "Waiting 40 seconds for workflow to complete..."
+          sleep 40
+
+      - name: Check if Telegram Publisher ran
+        run: |
+          RUNS=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=5")
+
+          echo "$RUNS" | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          publisher=[r for r in d['workflow_runs'] if r['name']=='Telegram Publisher']
+          if publisher:
+              r=publisher[0]
+              print('SUCCESS: Telegram Publisher ran!')
+              print('Run #'+str(r['run_number'])+' | '+r['created_at']+' | '+str(r.get('conclusion')))
+          else:
+              print('FAIL: Telegram Publisher did not run')
+              print('Recent runs:')
+              for r in d['workflow_runs'][:3]:
+                  print(r['name']+'|'+r['created_at']+'|'+str(r.get('conclusion')))
+          "
