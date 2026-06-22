@@ -1,7 +1,7 @@
 import sqlite3, json, copy
 
 DB = "/opt/n8n/n8n_data/database.sqlite"
-RSS_ID = "SIPnV2mqmgMqUkIb"
+RSS_ID = "SIPnV2mqmgMqUkLb"
 PARSER_ID = "F24jvKiXJIs4wRiZ"
 
 COPY_NODES = [
@@ -32,11 +32,11 @@ print(f"  Nodes: {list(parser_nodes.keys())}")
 
 anchor = parser_nodes.get("Claude — оценка поста") or parser_nodes.get("Code — фильтр оценки")
 if not anchor: raise SystemExit(f"Anchor not found! Available: {list(parser_nodes.keys())}")
-print(f"Anchor: {anchor['name']}")
+print(f"Anchor: {anchor["name"]}")
 
 found = [n for n in COPY_NODES if n in rss_nodes]
 print(f"Found {len(found)} nodes to copy: {found}")
-if not found: raise SystemExit("No nodes found in RSS!")
+if not found: raise SystemExit(f"No nodes found! RSS has: {list(rss_nodes.keys())}")
 
 parser["nodes"] = [n for n in parser["nodes"] if n["name"] not in set(COPY_NODES)]
 
@@ -67,4 +67,4 @@ cur.execute("UPDATE workflow_entity SET nodes=?,connections=? WHERE id=?",
      json.dumps(conns,ensure_ascii=False), PARSER_ID))
 con.commit()
 con.close()
-print("Done! Run: docker restart n8n")
+print("Done! Now run: docker restart n8n")
