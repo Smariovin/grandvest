@@ -1,0 +1,77 @@
+name: n8n AI Agent — Auto Fix
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-and-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
+
+      - name: Run auto-fix
+        run: |
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'python3 << '"'"'PYEOF'"'"'
+          import sqlite3, json, subprocess, urllib.request, urllib.parse
+
+          BOT_TOKEN = "8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg"
+          CHAT_ID = "5340000158"
+          DB = "/opt/n8n/n8n_data/database.sqlite"
+
+          CORRECT_CODE = """const postText = $("8. Подготовка данных поста").first().json.tg_post;
+          const imageUrl = $("HTTP Request — fal.ai").first().json.images[0].url;
+          const GH = "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";
+          const resp = await fetch("https://api.github.com/repos/Smariovin/grandvest/actions/workflows/telegram-publisher.yml/dispatches", {
+            method: "POST",
+            headers: {"Authorization": "Bearer " + GH, "Accept": "application/vnd.github.v3+json", "Content-Type": "application/json"},
+            body: JSON.stringify({ref: "main", inputs: {message: postText, image_url: imageUrl}})
+          });
+          return [{ json: { ok: resp.ok, status: resp.status } }];"""
+
+          def send_tg(msg):
+              data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}).encode()
+              try:
+                  urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage", data=data), timeout=10)
+              except: pass
+
+          fixes = []
+          con = sqlite3.connect(DB)
+          cur = con.cursor()
+          cur.execute("SELECT id, name, active, nodes FROM workflow_entity")
+          for wf_id, wf_name, active, nodes_json in cur.fetchall():
+              nodes = json.loads(nodes_json)
+              if not active:
+                  cur.execute("UPDATE workflow_entity SET active=1 WHERE id=?", (wf_id,))
+                  fixes.append("Активирован: " + wf_name)
+              for n in nodes:
+                  if "Отправка" in n.get("name", ""):
+                      code = n.get("parameters", {}).get("jsCode", "")
+                      if "python3" in code or "import sqlite3" in code or "$credentials" in code or len(code.strip()) < 10:
+                          n["parameters"]["jsCode"] = CORRECT_CODE
+                          cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?", (json.dumps(nodes, ensure_ascii=False), wf_id))
+                          fixes.append("Исправлен узел Отправка в: " + wf_name)
+          con.commit()
+          con.close()
+          r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", "n8n"], capture_output=True, text=True)
+          if r.stdout.strip() != "true":
+              subprocess.run(["docker", "start", "n8n"])
+              fixes.append("n8n был остановлен — запущен")
+          if fixes:
+              subprocess.run(["docker", "restart", "n8n"])
+              send_tg("Grandvest AI Agent\n\n" + "\n".join(fixes))
+              print("FIXED: " + str(fixes))
+          else:
+              print("ALL OK")
+          PYEOF'
