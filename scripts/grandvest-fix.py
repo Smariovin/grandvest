@@ -9,7 +9,9 @@ def tg(m):
     try:
         d=urllib.parse.urlencode({"chat_id":CID,"text":m,"parse_mode":"HTML"}).encode()
         urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot"+BOT+"/sendMessage",d),timeout=10)
-    except: pass
+        print("TG sent OK")
+    except Exception as e:
+        print("TG error:",e)
 fixes=[];status=[]
 try:
     con=sqlite3.connect(DB);cur=con.cursor()
@@ -30,16 +32,24 @@ try:
                 c=n.get("parameters",{}).get("jsCode","")
                 if "python3" in c or "import sqlite" in c or "$credentials" in c or len(c.strip())<10:
                     n["parameters"]["jsCode"]=CODE;changed=True
-                    fixes.append("🔧 Исправлен узел Отправка: "+wname)
+                    fixes.append("🔧 Исправлен узел: "+wname)
         if changed:
             cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?",(json.dumps(nodes,ensure_ascii=False),wid))
         status.append(("✅" if active else "❌")+" "+wname)
     con.commit();con.close()
-    if fixes: subprocess.run(["docker","restart","n8n"],capture_output=True)
+    if fixes:
+        subprocess.run(["docker","restart","n8n"],capture_output=True)
 except Exception as e:
     fixes.append("❌ Ошибка: "+str(e)[:100])
-try: urllib.request.urlopen("http://localhost:5678/healthz",timeout=5);ui="✅ Доступен"
-except: ui="❌ Недоступен"
+try:
+    urllib.request.urlopen("http://localhost:5678/healthz",timeout=5)
+    ui="✅ Доступен"
+except:
+    ui="❌ Недоступен"
 now=datetime.now().strftime("%d.%m.%Y %H:%M")
-msg=("🤖 <b>Grandvest Agent — Исправления</b>\n\n"+"\n".join(fixes) if fixes else "🤖 <b>Grandvest Agent — OK</b>\n\n"+"\n".join(status))+"\n\n🌐 n8n: "+ui+"\n🕐 "+now+" МСК"
-tg(msg);print("Done:",fixes if fixes else "OK")
+if fixes:
+    msg="🤖 <b>Grandvest Agent — Исправления</b>\n\n"+chr(10).join(fixes)+"\n\n🌐 n8n: "+ui+"\n🕐 "+now+" МСК"
+else:
+    msg="🤖 <b>Grandvest Agent — OK</b>\n\n"+chr(10).join(status)+"\n\n🌐 n8n: "+ui+"\n🕐 "+now+" МСК"
+tg(msg)
+print("Done:",fixes if fixes else "OK")
