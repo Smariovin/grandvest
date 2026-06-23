@@ -30,17 +30,15 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
 
-      - name: Deploy fix script
+      - name: Deploy scripts
         run: |
           scp -o StrictHostKeyChecking=no scripts/grandvest-fix.py root@85.239.61.157:/opt/grandvest-fix.py
+          scp -o StrictHostKeyChecking=no scripts/grandvest-check.sh root@85.239.61.157:/opt/grandvest-check.sh
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'chmod +x /opt/grandvest-check.sh'
 
-      - name: Fix container
+      - name: Fix container and workflows
         run: |
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'bash /opt/grandvest-check.sh'
-
-      - name: Run fix script
-        run: |
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'python3 /opt/grandvest-fix.py'
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'bash /opt/grandvest-check.sh && python3 /opt/grandvest-fix.py'
 
       - name: Test publish
         if: ${{ github.event.inputs.mode == 'test_publish' }}
