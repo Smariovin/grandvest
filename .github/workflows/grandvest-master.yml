@@ -1,4 +1,4 @@
-name: Grandvest AI Content Factory — Master Setup & Control
+name: Grandvest Master Agent
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Режим запуска'
+        description: 'Режим'
         required: true
         default: 'healthcheck'
         type: choice
@@ -31,22 +31,19 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
 
-      - name: Check and fix container
+      - name: Fix container and workflows
         run: |
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'bash -s' << 'SSHEOF'
-          ENVS=$(docker inspect n8n 2>/dev/null | grep -A30 Env | head -30)
-          RUNNING=$(docker inspect -f '{{.State.Running}}' n8n 2>/dev/null || echo false)
-          NEED=false
-          for V in "N8N_SECURE_COOKIE=false" "N8N_TIMEZONE=Europe/Moscow" "GENERIC_TIMEZONE=Europe/Moscow"; do
-            echo "$ENVS" | grep -q "$V" || NEED=true
-          done
-          [ "$RUNNING" != "true" ] && NEED=true
-          if [ "$NEED" = "true" ]; then
-            docker stop n8n 2>/dev/null; docker rm n8n 2>/dev/null
-            docker run -d --name n8n --restart unless-stopped -p 5678:5678 \
-              -v /opt/n8n/n8n_data:/home/node/.n8n \
-cd /workspaces/grandvest && mkdir -p .github/workflows && cat > .github/workflows/grandvest-master.yml << 'ENDOFFILE'
-name: Grandvest AI Content Factory — Master Setup & Control
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "bash /opt/grandvest-agent.sh"
+
+      - name: Test publish
+        if: ${{ github.event.inputs.mode == 'test_publish' }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d '{"chat_id":"5340000158","text":"✅ Grandvest Agent test
+cd /workspaces/grandvest
+cat > .github/workflows/grandvest-master.yml << 'EOF'
+name: Grandvest Master Agent
 
 on:
   schedule:
@@ -55,7 +52,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Режим запуска'
+        description: 'Режим'
         required: true
         default: 'healthcheck'
         type: choice
@@ -79,114 +76,13 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
 
-      - name: Check and fix container
+      - name: Fix container and workflows
         run: |
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'bash -s' << 'SSHEOF'
-          ENVS=$(docker inspect n8n 2>/dev/null | grep -A30 Env | head -30)
-          RUNNING=$(docker inspect -f '{{.State.Running}}' n8n 2>/dev/null || echo false)
-          NEED=false
-          for V in "N8N_SECURE_COOKIE=false" "N8N_TIMEZONE=Europe/Moscow" "GENERIC_TIMEZONE=Europe/Moscow"; do
-            echo "$ENVS" | grep -q "$V" || NEED=true
-          done
-          [ "$RUNNING" != "true" ] && NEED=true
-          if [ "$NEED" = "true" ]; then
-            docker stop n8n 2>/dev/null; docker rm n8n 2>/dev/null
-            docker run -d --name n8n --restart unless-stopped -p 5678:5678 \
-              -v /opt/n8n/n8n_data:/home/node/.n8n \
-              -v /data:/data \
-              -e N8N_TIMEZONE=Europe/Moscow \
-              -e GENERIC_TIMEZONE=Europe/Moscow \
-              -e N8N_SECURE_COOKIE=false \
-              n8nio/n8n:latest
-            sleep 20
-            echo "RECREATED"
-          else
-            echo "OK"
-          fi
-          SSHEOF
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "bash /opt/grandvest-agent.sh"
 
-      - name: Fix workflows in DB
+      - name: Test publish
+        if: ${{ github.event.inputs.mode == 'test_publish' }}
         run: |
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'bash -s' << 'SSHEOF'
-          python3 << 'PYEOF'
-import sqlite3, json, subprocess, urllib.request, urllib.parse
-DB = "/opt/n8n/n8n_data/database.sqlite"
-BOT = "8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg"
-CID = "5340000158"
-CODE = ('const postText = $("8. \u041f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0430 \u0434\u0430\u043d\u043d\u044b\u0445 \u043f\u043e\u0441\u0442\u0430").first().json.tg_post;\n'
-'const imageUrl = $("HTTP Request \u2014 fal.ai").first().json.images[0].url;\n'
-'const botToken = "8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg";\n'
-'const chatId = "-1003971323034";\n'
-'const resp = await fetch("https://api.telegram.org/bot"+botToken+"/sendPhoto",{\n'
-'  method:"POST",headers:{"Content-Type":"application/json"},\n'
-'  body:JSON.stringify({chat_id:chatId,photo:imageUrl,caption:postText,parse_mode:"HTML"})\n'
-'});\nconst result = await resp.json();\nreturn [{json:result}];')
-def tg(m):
-    try:
-        d=urllib.parse.urlencode({"chat_id":CID,"text":m,"parse_mode":"HTML"}).encode()
-        urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot"+BOT+"/sendMessage",d),timeout=10)
-    except: pass
-fixes=[]
-con=sqlite3.connect(DB)
-cur=con.cursor()
-cur.execute("SELECT id,name,active,nodes FROM workflow_entity")
-for wid,wname,active,nj in cur.fetchall():
-    nodes=json.loads(nj)
-    if not active:
-        cur.execute("UPDATE workflow_entity SET active=1 WHERE id=?",(wid,))
-        fixes.append("Активирован: "+wname)
-    for n in nodes:
-        if "\u041e\u0442\u043f\u0440\u0430\u0432\u043a\u0430" in n.get("name",""):
-            c=n.get("parameters",{}).get("jsCode","")
-            if "python3" in c or "import sqlite" in c or "$credentials" in c or len(c.strip())<10:
-                n["parameters"]["jsCode"]=CODE
-                cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?",(json.dumps(nodes,ensure_ascii=False),wid))
-                fixes.append("Исправлен узел в: "+wname)
-con.commit(); con.close()
-if fixes:
-    subprocess.run(["docker","restart","n8n"])
-    tg("🤖 <b>Grandvest Agent</b>\n\n"+"".join(["✅ "+f+"\n" for f in fixes]))
-    print("FIXED:",fixes)
-else:
-    print("ALL OK")
-PYEOF
-          SSHEOF
-
-      - name: Send report
-        if: always()
-        run: |
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'bash -s' << 'SSHEOF'
-          python3 << 'PYEOF'
-import sqlite3,json,urllib.request,urllib.parse,subprocess
-from datetime import datetime
-BOT="8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg"
-CID="5340000158"
-DB="/opt/n8n/n8n_data/database.sqlite"
-def tg(m):
-    try:
-        d=urllib.parse.urlencode({"chat_id":CID,"text":m,"parse_mode":"HTML"}).encode()
-        urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot"+BOT+"/sendMessage",d),timeout=10)
-    except: pass
-r=["🤖 <b>Grandvest — Отчёт агента</b>",""]
-run=subprocess.run(["docker","inspect","-f","{{.State.Running}}","n8n"],capture_output=True,text=True).stdout.strip()
-r.append("🐳 n8n: "+("✅ Работает" if run=="true" else "❌ Остановлен"))
-try:
-    urllib.request.urlopen("http://localhost:5678/healthz",timeout=5)
-    r.append("🌐 UI: ✅ Доступен")
-except:
-    r.append("🌐 UI: ❌ Недоступен")
-try:
-    con=sqlite3.connect(DB)
-    cur=con.cursor()
-    cur.execute("SELECT name,active FROM workflow_entity")
-    r.append("\n📋 <b>Workflow:</b>")
-    for name,active in cur.fetchall():
-        r.append("  "+("✅" if active else "❌")+" "+name)
-    con.close()
-except Exception as e:
-    r.append("⚠️ БД: "+str(e)[:50])
-r.append("\n🕐 "+datetime.now().strftime("%d.%m.%Y %H:%M")+" МСК")
-tg("\n".join(r))
-print("Report sent")
-PYEOF
-          SSHEOF
+          curl -s -X POST "https://api.telegram.org/bot8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d '{"chat_id":"5340000158","text":"✅ Grandvest Agent test OK","parse_mode":"HTML"}'
