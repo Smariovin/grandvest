@@ -43,4 +43,4 @@ jobs:
       - name: Test publish
         if: ${{ github.event.inputs.mode == 'test_publish' }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg/sendMessage" -H "Content-Type: application/json" -d '{"chat_id":"5340000158","text":"✅ Grandvest Agent test OK","parse_mode":"HTML"}'
+          curl -s -X POST "https://api.telegram.org/bot8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw/sendMessage" -H "Content-Type: application/json" -d '{"chat_id":"5340000158","text":"✅ Grandvest Agent test OK","parse_mode":"HTML"}'
