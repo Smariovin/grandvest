@@ -30,70 +30,19 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
 
-      - name: Deploy and run fix script
-        run: |
-          scp -o StrictHostKeyChecking=no
-cd /workspaces/grandvest
-cat > .github/workflows/grandvest-master.yml << 'EOF'
-name: Grandvest Master Agent
-
-on:
-  schedule:
-    - cron: '0 6 * * *'
-    - cron: '0 15 * * *'
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Режим'
-        required: true
-        default: 'healthcheck'
-        type: choice
-        options:
-          - healthcheck
-          - test_publish
-
-jobs:
-  master-control:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-
-      - name: Deploy and run fix script
+      - name: Deploy fix script
         run: |
           scp -o StrictHostKeyChecking=no scripts/grandvest-fix.py root@85.239.61.157:/opt/grandvest-fix.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 bash << 'SH'
-          ENVS=$(docker inspect n8n 2>/dev/null | grep -A30 Env | head -30)
-          RUNNING=$(docker inspect -f '{{.State.Running}}' n8n 2>/dev/null || echo false)
-          NEED=false
-          echo "$ENVS" | grep -q "N8N_SECURE_COOKIE=false" || NEED=true
-          echo "$ENVS" | grep -q "N8N_TIMEZONE=Europe/Moscow" || NEED=true
-          [ "$RUNNING" != "true" ] && NEED=true
-          if [ "$NEED" = "true" ]; then
-            docker stop n8n 2>/dev/null; docker rm n8n 2>/dev/null
-            docker run -d --name n8n --restart unless-stopped -p 5678:5678 \
-              -v /opt/n8n/n8n_data:/home/node/.n8n \
-              -v /data:/data \
-              -e N8N_TIMEZONE=Europe/Moscow \
-              -e GENERIC_TIMEZONE=Europe/Moscow \
-              -e N8N_SECURE_COOKIE=false \
-              n8nio/n8n:latest
-            sleep 20
-          fi
-          python3 /opt/grandvest-fix.py
-          SH
+
+      - name: Fix container
+        run: |
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'bash /opt/grandvest-check.sh'
+
+      - name: Run fix script
+        run: |
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 'python3 /opt/grandvest-fix.py'
 
       - name: Test publish
         if: ${{ github.event.inputs.mode == 'test_publish' }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg/sendMessage" \
-            -H "Content-Type: application/json" \
-            -d '{"chat_id":"5340000158","text":"✅ Grandvest Agent test OK","parse_mode":"HTML"}'
+          curl -s -X POST "https://api.telegram.org/bot8672691136:AAF4yJeigfcmn6eCCkKC8GdJvxDb0o9cNnDg/sendMessage" -H "Content-Type: application/json" -d '{"chat_id":"5340000158","text":"✅ Grandvest Agent test OK","parse_mode":"HTML"}'
