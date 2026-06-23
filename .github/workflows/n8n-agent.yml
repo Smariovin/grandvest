@@ -32,7 +32,7 @@ jobs:
 
           CORRECT_CODE = """const postText = $("8. Подготовка данных поста").first().json.tg_post;
           const imageUrl = $("HTTP Request — fal.ai").first().json.images[0].url;
-          const GH = "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";
+          const GH = "${{ secrets.GH_TOKEN }}";
           const resp = await fetch("https://api.github.com/repos/Smariovin/grandvest/actions/workflows/telegram-publisher.yml/dispatches", {
             method: "POST",
             headers: {"Authorization": "Bearer " + GH, "Accept": "application/vnd.github.v3+json", "Content-Type": "application/json"},
