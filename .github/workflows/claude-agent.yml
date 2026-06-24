@@ -16,12 +16,10 @@ jobs:
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
 
       - name: Run Grandvest Agent
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           pip install requests -q
           python3 << 'PYEOF'
-          import subprocess, requests, json, os, time
+          import subprocess, requests, time
 
           BOT = "8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw"
           CHAT = "5340000158"
@@ -38,10 +36,9 @@ jobs:
               try:
                   requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage',
                       data={'chat_id': CHAT, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
-              except:
-                  pass
+              except Exception as e:
+                  print(f'TG error: {e}')
 
-          # 1. Проверка n8n
           out = ssh("docker ps | grep n8n | wc -l")
           if out == '0':
               report.append('❌ n8n не запущен — перезапускаем')
@@ -50,32 +47,23 @@ jobs:
           else:
               report.append('✅ n8n работает')
 
-          # 2. Healthcheck
           out = ssh("curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz")
           report.append(f'📊 Healthcheck: {out}')
 
-          # 3. Исправляем узлы
           out = ssh("python3 /root/fix_grandvest_all.py 2>&1")
           report.append(f'🔧 Патч:\n{out[:200]}')
 
-          # 4. Сброс дедупликации
           ssh("echo '[]' > /data/published_titles.json && echo '[]' > /opt/n8n/n8n_data/published_titles.json")
           report.append('🔄 Дедупликация сброшена')
 
-          # 5. Тест парсера
-          out = ssh("""curl -s -X POST http://localhost:5678/webhook/telegram-parser \
-              -H 'Content-Type: application/json' \
-              -d '{"channel":"arendator_ru","html":"<div class=\\"tgme_widget_message_text\\">Офисная недвижимость Москвы: тест агента 2026</div>"}'""")
+          out = ssh("""curl -s -X POST http://localhost:5678/webhook/telegram-parser -H 'Content-Type: application/json' -d '{"channel":"arendator_ru","html":"<div class=\\"tgme_widget_message_text\\">Офисная недвижимость Москвы: тест агента 2026</div>"}'""")
           report.append(f'🚀 Тест: {out}')
 
-          # 6. Ждём
           time.sleep(30)
 
-          # 7. Логи
           out = ssh("docker logs n8n --tail 3")
           report.append(f'📋 Логи: {out[:150]}')
 
-          # 8. Отчёт
           text = '<b>🤖 Агент Grandvest</b>\n\n' + '\n'.join(report)
           tg(text)
           print(text)
