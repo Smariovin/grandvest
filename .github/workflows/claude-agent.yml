@@ -4,18 +4,10 @@ on:
     - cron: '0 6,15 * * *'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  id-token: write
-  issues: write
-  pull-requests: write
-
 jobs:
   fix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -23,32 +15,64 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
 
-      - name: Run Claude Agent
-        uses: anthropics/claude-code-action@beta
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          timeout_minutes: 30
-          mode: agent
-          direct_prompt: |
-            Ты агент обслуживания Grandvest AI Content Factory. Работай автономно.
+      - name: Run Grandvest Agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TG_BOT: "8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw"
+          TG_CHAT: "5340000158"
+        run: |
+          python3 << 'PYEOF'
+          import subprocess, requests, json, os
 
-            SSH ключ настроен в ~/.ssh/id_rsa
+          BOT = os.environ['TG_BOT']
+          CHAT = os.environ['TG_CHAT']
+          report = []
 
-            ВЫПОЛНИ ПО ПОРЯДКУ используя bash команды:
+          def ssh(cmd):
+              r = subprocess.run(
+                  ['ssh', '-o', 'StrictHostKeyChecking=no', 'root@85.239.61.157', cmd],
+                  capture_output=True, text=True, timeout=60
+              )
+              return r.stdout + r.stderr
 
-            1. Проверь n8n:
-            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "docker ps | grep n8n && curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz"
+          def tg(msg):
+              requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage',
+                  data={'chat_id': CHAT, 'text': msg, 'parse_mode': 'HTML'})
 
-            2. Исправь узлы:
-            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /root/fix_grandvest_all.py"
+          # 1. Проверка n8n
+          out = ssh("docker ps | grep n8n | wc -l")
+          if out.strip() == '0':
+              report.append('❌ n8n не запущен — перезапускаем')
+              ssh('chown 1000:1000 /opt/n8n/n8n_data/database.sqlite && chmod 644 /opt/n8n/n8n_data/database.sqlite && docker restart n8n')
+              import time; time.sleep(20)
+          else:
+              report.append('✅ n8n работает')
 
-            3. Сброс дедупликации:
-            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "echo '[]' > /data/published_titles.json && echo '[]' > /opt/n8n/n8n_data/published_titles.json"
+          # 2. Healthcheck
+          out = ssh("curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz")
+          report.append(f'📊 n8n healthcheck: {out.strip()}')
 
-            4. Тест парсера:
-            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "curl -X POST http://localhost:5678/webhook/telegram-parser -H 'Content-Type: application/json' -d '{\"channel\":\"arendator_ru\",\"html\":\"<div class=\\\"tgme_widget_message_text\\\">Офисная недвижимость Москвы: тест агента</div>\"}'"
+          # 3. Исправляем узлы
+          out = ssh("python3 /root/fix_grandvest_all.py")
+          report.append(f'🔧 Патч узлов:\n{out.strip()[:300]}')
 
-            5. Отправь отчёт в Telegram:
-            curl -s -X POST "https://api.telegram.org/bot8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw/sendMessage" \
-              -d "chat_id=5340000158&parse_mode=HTML&text=<b>Отчёт агента Grandvest</b>%0AПроверка завершена"
+          # 4. Сброс дедупликации
+          ssh("echo '[]' > /data/published_titles.json && echo '[]' > /opt/n8n/n8n_data/published_titles.json")
+          report.append('🔄 Дедупликация сброшена')
+
+          # 5. Тест парсера
+          out = ssh("""curl -s -X POST http://localhost:5678/webhook/telegram-parser \
+              -H 'Content-Type: application/json' \
+              -d '{"channel":"arendator_ru","html":"<div class=\\"tgme_widget_message_text\\">Офисная недвижимость Москвы: тест агента 2026</div>"}'""")
+          report.append(f'🚀 Тест парсера: {out.strip()}')
+
+          # 6. Ждём и проверяем результат
+          import time; time.sleep(30)
+          out = ssh("docker logs n8n --tail 5")
+          report.append(f'📋 Логи n8n:\n{out.strip()[:200]}')
+
+          # 7. Отправляем отчёт
+          text = '<b>🤖 Отчёт агента Grandvest</b>\n\n' + '\n'.join(report)
+          tg(text)
+          print(text)
+          PYEOF
