@@ -1,7 +1,7 @@
 name: Claude Auto-Fix Agent
 on:
   schedule:
-    - cron: '0 6,15 * * *'
+    - cron: "0 6,15 * * *"
   workflow_dispatch:
 jobs:
   fix:
@@ -16,7 +16,41 @@ jobs:
       - name: Run Agent
         run: |
           pip install requests -q
-          cat > /tmp/agent.py << 'PYEOF'
-          # agent code will be copied here
-          PYEOF
-          python3 /tmp/agent.py
+          python3 << PYEOF
+import subprocess, requests, time, json
+BOT = "8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw"
+CHAT = "5340000158"
+report = []
+def ssh(cmd):
+    r = subprocess.run(['ssh','-o','StrictHostKeyChecking=no','root@85.239.61.157',cmd],capture_output=True,text=True,timeout=120)
+    return (r.stdout+r.stderr).strip()
+def tg(msg):
+    try: requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage',data={'chat_id':CHAT,'text':msg[:4000],'parse_mode':'HTML'},timeout=10)
+    except: pass
+out=ssh("docker ps|grep n8n|wc -l")
+report.append('✅ n8n работает' if out.strip()!='0' else '❌ n8n упал')
+if out.strip()=='0': ssh('chown 1000:1000 /opt/n8n/n8n_data/database.sqlite && chmod 644 /opt/n8n/n8n_data/database.sqlite && docker restart n8n'); time.sleep(20)
+out=ssh("curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz")
+report.append(f'📊 Health: {out}')
+out=ssh("python3 /root/fix_grandvest_all.py 2>&1")
+report.append(f'🔧 Патч: {out[:200]}')
+ssh("docker restart n8n"); time.sleep(20); report.append('🔄 Перезапущен')
+ssh("echo '[]' > /data/published_titles.json; echo '[]' > /opt/n8n/n8n_data/published_titles.json"); report.append('🔄 Дедупликация сброшена')
+out=ssh('curl -s -X POST http://localhost:5678/webhook/telegram-parser -H \'Content-Type: application/json\' -d \'{"channel":"arendator_ru","html":"<div class=\\"tgme_widget_message_text js-message_text\\" dir=\\"auto\\">Офисная недвижимость Москвы 2026: рост спроса на аренду офисов зафиксировали аналитики</div><time datetime=\\"2026-06-25T10:00:00+00:00\\">10:00</time>"}\'')
+report.append(f'🚀 Тест: {out}'); time.sleep(60)
+check=ssh("curl -s -c /tmp/ck.txt -X POST http://localhost:5678/rest/login -H 'Content-Type: application/json' -d '{\"emailOrLdapLoginId\":\"admin@grandvest.ru\",\"password\":\"Grandvest2026!\"}' >/dev/null && curl -s -b /tmp/ck.txt 'http://localhost:5678/rest/executions?limit=1'")
+try:
+    data=json.loads(check); execs=data.get('data',{}).get('data',[])
+    if execs:
+        e=execs[0]; status=e.get('status','?'); report.append(f'📋 Execution: {status}')
+        if status=='error':
+            rd=e.get('data',{}).get('resultData',{}).get('runData',{})
+            for node,runs in rd.items():
+                for run in runs:
+                    err=run.get('error')
+                    if err: report.append(f'❌ [{node}]: {str(err)[:150]}')
+except: report.append(f'📋 {check[:100]}')
+text='<b>🤖 Агент Grandvest</b>\n\n'+'\n'.join(report)
+tg(text); print(text)
+
+PYEOF
