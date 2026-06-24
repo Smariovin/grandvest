@@ -33,3 +33,8 @@ try:
 except: report.append(f'📋 {check[:100]}')
 text='<b>🤖 Агент Grandvest</b>\n\n'+'\n'.join(report)
 tg(text); print(text)
+
+# Активация workflow
+login = ssh("curl -s -c /tmp/ck.txt -X POST http://localhost:5678/rest/login -H 'Content-Type: application/json' -d '{\"emailOrLdapLoginId\":\"admin@grandvest.ru\",\"password\":\"Grandvest2026!\"}' > /dev/null && echo OK")
+ssh("curl -s -b /tmp/ck.txt -X POST 'http://localhost:5678/rest/workflows/F24jvKiXJIs4wRiZ/activate' -H 'Content-Type: application/json' > /dev/null && curl -s -b /tmp/ck.txt -X POST 'http://localhost:5678/rest/workflows/SIPnV2mqmgMqUkLb/activate' -H 'Content-Type: application/json' > /dev/null")
+report.append('✅ Workflow активированы')
