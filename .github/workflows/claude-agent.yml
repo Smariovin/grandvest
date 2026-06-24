@@ -4,6 +4,10 @@ on:
     - cron: '0 6,15 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   fix:
     runs-on: ubuntu-latest
@@ -21,12 +25,13 @@ jobs:
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           timeout_minutes: 30
           direct_prompt: |
             Ты агент обслуживания Grandvest AI Content Factory. Работай автономно, без вопросов.
 
             СЕРВЕР: root@85.239.61.157
-            SSH ключ уже настроен в ~/.ssh/id_rsa
+            SSH ключ настроен в ~/.ssh/id_rsa
 
             ВЫПОЛНИ ПО ПОРЯДКУ:
 
@@ -34,24 +39,23 @@ jobs:
             ssh -o StrictHostKeyChecking=no root@85.239.61.157 "docker ps | grep n8n && curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz"
 
             2. ЕСЛИ N8N НЕ ОТВЕЧАЕТ — ВОССТАНОВИ:
-            ssh root@85.239.61.157 "chown 1000:1000 /opt/n8n/n8n_data/database.sqlite && chmod 644 /opt/n8n/n8n_data/database.sqlite && docker restart n8n && sleep 15"
+            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "chown 1000:1000 /opt/n8n/n8n_data/database.sqlite && chmod 644 /opt/n8n/n8n_data/database.sqlite && docker restart n8n && sleep 15"
 
-            3. ПРОВЕРЬ И ИСПРАВЬ УЗЛЫ через SQLite:
-            ssh root@85.239.61.157 "python3 /root/fix_grandvest_all.py"
+            3. ПРОВЕРЬ И ИСПРАВЬ УЗЛЫ:
+            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /root/fix_grandvest_all.py"
 
             4. СБРОС ДЕДУПЛИКАЦИИ:
-            ssh root@85.239.61.157 "echo '[]' > /data/published_titles.json && echo '[]' > /opt/n8n/n8n_data/published_titles.json"
+            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "echo '[]' > /data/published_titles.json && echo '[]' > /opt/n8n/n8n_data/published_titles.json"
 
             5. ТЕСТ ПАРСЕРА:
-            ssh root@85.239.61.157 "curl -X POST http://localhost:5678/webhook/telegram-parser -H 'Content-Type: application/json' -d '{\"channel\":\"arendator_ru\",\"html\":\"<div class=\\\"tgme_widget_message_text\\\">Офисная недвижимость Москвы: тест агента</div>\"}'"
+            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "curl -X POST http://localhost:5678/webhook/telegram-parser -H 'Content-Type: application/json' -d '{\"channel\":\"arendator_ru\",\"html\":\"<div class=\\\"tgme_widget_message_text\\\">Офисная недвижимость Москвы: тест агента</div>\"}'"
 
-            6. ПОДОЖДИ 60 СЕКУНД — дай время workflow отработать:
+            6. ПОДОЖДИ 60 СЕКУНД:
             sleep 60
 
             7. ПРОВЕРЬ ПОСЛЕДНИЙ EXECUTION:
-            ssh root@85.239.61.157 "curl -s -c /tmp/cook.txt -X POST http://localhost:5678/rest/login -H 'Content-Type: application/json' -d '{\"emailOrLdapLoginId\":\"admin@grandvest.ru\",\"password\":\"Grandvest2026!\"}' > /dev/null && curl -s -b /tmp/cook.txt http://localhost:5678/rest/executions?limit=1"
+            ssh -o StrictHostKeyChecking=no root@85.239.61.157 "curl -s -c /tmp/cook.txt -X POST http://localhost:5678/rest/login -H 'Content-Type: application/json' -d '{\"emailOrLdapLoginId\":\"admin@grandvest.ru\",\"password\":\"Grandvest2026!\"}' > /dev/null && curl -s -b /tmp/cook.txt 'http://localhost:5678/rest/executions?limit=1'"
 
-            8. ОТПРАВЬ ОТЧЁТ В TELEGRAM (всегда, независимо от результата):
-            Используй curl для отправки сообщения:
+            8. ОТПРАВЬ ОТЧЁТ В TELEGRAM:
             curl -X POST "https://api.telegram.org/bot8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw/sendMessage" \
-              -d "chat_id=5340000158&parse_mode=HTML&text=<b>🤖 Отчёт агента Grandvest</b>%0A[опиши что проверил и результат]"
+              -d "chat_id=5340000158&parse_mode=HTML&text=<b>🤖 Отчёт агента Grandvest</b>%0AРезультат проверки системы"
