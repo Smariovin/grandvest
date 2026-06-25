@@ -40,11 +40,6 @@ try:
                     changed = True
                     fixes.append("Расписание исправлено: " + wname)
             if "\u041e\u0442\u043f\u0440\u0430\u0432\u043a\u0430" in nm:
-                c = n.get("parameters", {}).get("jsCode", "")
-                if "python3" in c or "import sqlite" in c or "$credentials" in c or len(c.strip()) < 10:
-                    n["parameters"]["jsCode"] = CODE
-                    changed = True
-                    fixes.append("Исправлен узел: " + wname)
         if changed:
             cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?",
                         (json.dumps(nodes, ensure_ascii=False), wid))
