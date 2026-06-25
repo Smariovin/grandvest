@@ -1,0 +1,77 @@
+name: TG Publish
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Post text"
+        required: true
+      image_url:
+        description: "Image URL"
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          INPUT_MESSAGE: ${{ github.event.inputs.message }}
+          INPUT_IMAGE_URL: ${{ github.event.inputs.image_url }}
+        run: |
+          python3 - <<PYEOF
+import os, sys, json, urllib.request, urllib.error
+
+bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+chat_id = os.environ["TELEGRAM_CHAT_ID"]
+
+# Read from GITHUB_EVENT_PATH (most reliable for multiline/unicode text)
+message = ""
+image_url = ""
+event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+if event_path and os.path.exists(event_path):
+    with open(event_path, "r", encoding="utf-8") as f:
+        event = json.load(f)
+    inputs = event.get("inputs", {})
+    message = inputs.get("message", "")
+    image_url = inputs.get("image_url", "")
+
+# Fallback to env vars
+if not message:
+    message = os.environ.get("INPUT_MESSAGE", "")
+if not image_url:
+    image_url = os.environ.get("INPUT_IMAGE_URL", "")
+
+print(f"Message length: {len(message)} chars")
+print(f"Preview: {message[:100]!r}")
+print(f"Image: {image_url[:80] if image_url else 'none'}")
+
+if not message:
+    print("ERROR: empty message")
+    sys.exit(1)
+
+api_base = f"https://api.telegram.org/bot{bot_token}"
+
+if image_url:
+    url = f"{api_base}/sendPhoto"
+    payload = {"chat_id": chat_id, "photo": image_url, "caption": message, "parse_mode": "HTML"}
+else:
+    url = f"{api_base}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+
+data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json; charset=utf-8"})
+try:
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
+        if result.get("ok"):
+            msg_id = result.get("result", {}).get("message_id", "?")
+            print(f"SUCCESS: published! message_id={msg_id}")
+        else:
+            print(f"Telegram error: {result}")
+            sys.exit(1)
+except urllib.error.HTTPError as e:
+    print(f"HTTP {e.code}: {e.read().decode()}")
+    sys.exit(1)
+PYEOF
