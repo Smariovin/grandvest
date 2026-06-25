@@ -54,20 +54,7 @@ for (const item of items) {
 return unique.slice(0, 1);"""
                 changed = True
                 print("OK: дедупликация исправлена в", wf_name)
-        if node.get("name") == "9. Отправка в Telegram" and node.get("type") == "n8n-nodes-base.code":
-            node["parameters"]["jsCode"] = """const postText = $("8. Подготовка данных поста").first().json.tg_post;
-const imageUrl = $("HTTP Request \\u2014 fal.ai").first().json.images[0].url;
-const botToken = "8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw";
-const chatId = "-1003971323034";
-const response = await this.helpers.httpRequest({
-  method: "POST",
-  url: "https://api.telegram.org/bot" + botToken + "/sendPhoto",
-  headers: {"Content-Type": "application/json"},
-  body: {chat_id: chatId, photo: imageUrl, caption: postText, parse_mode: "HTML"}
-});
-return [{ json: response }];"""
-            changed = True
-            print("OK: узел 9 исправлен в", wf_name)
+        # Node 9 uses grandvest-publisher.yml - do not reset
     if changed:
         c.execute("UPDATE workflow_entity SET nodes = ? WHERE id = ?", (json.dumps(nodes), wf_id))
 conn.commit()
