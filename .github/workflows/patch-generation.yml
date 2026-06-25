@@ -1,0 +1,19 @@
+name: Patch Generation Prompt
+on:
+  workflow_dispatch:
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
+      - name: Patch on VPS
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/patch_generation.py root@85.239.61.157:/tmp/patch_generation.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/patch_generation.py 2>&1"
