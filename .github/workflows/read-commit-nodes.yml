@@ -13,13 +13,35 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Read nodes from VPS
-        run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/verify_state.py root@85.239.61.157:/tmp/verify_state.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/verify_state.py 2>&1" > /tmp/nodes_state.json
-          echo "File size: $(wc -c < /tmp/nodes_state.json) bytes"
-          head -120 /tmp/nodes_state.json
-      - name: Commit via GitHub API
+      - name: Read and commit
         env:
           GH_PAT: ${{ secrets.GH_TOKEN }}
-        run: python3 scripts/commit_nodes.py
+        run: |
+          # Read from VPS into workspace
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/verify_state.py root@85.239.61.157:/tmp/verify_state.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/verify_state.py 2>&1" > $GITHUB_WORKSPACE/debug_nodes.json
+          
+          SIZE=$(wc -c < $GITHUB_WORKSPACE/debug_nodes.json)
+          echo "File size: $SIZE bytes"
+          head -80 $GITHUB_WORKSPACE/debug_nodes.json
+          
+          # Commit via GitHub API
+          ENCODED=$(base64 -w 0 $GITHUB_WORKSPACE/debug_nodes.json)
+          
+          # Get existing SHA
+          EXISTING=$(curl -s -H "Authorization: token $GH_PAT" \
+            "https://api.github.com/repos/Smariovin/grandvest/contents/debug/nodes_state.json" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sha',''))" 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING" ]; then
+            PAYLOAD="{\"message\":\"debug: nodes state\",\"content\":\"$ENCODED\",\"sha\":\"$EXISTING\"}"
+          else
+            PAYLOAD="{\"message\":\"debug: nodes state\",\"content\":\"$ENCODED\"}"
+          fi
+          
+          curl -s -X PUT \
+            -H "Authorization: token $GH_PAT" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "https://api.github.com/repos/Smariovin/grandvest/contents/debug/nodes_state.json" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print('Committed:', d.get('content',{}).get('sha','?')[:12])"
