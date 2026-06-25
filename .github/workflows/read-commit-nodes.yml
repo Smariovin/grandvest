@@ -7,23 +7,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Read nodes and commit
+      - name: Read nodes from VPS
         run: |
-          mkdir -p debug
           scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/verify_state.py root@85.239.61.157:/tmp/verify_state.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/verify_state.py 2>&1" > debug/nodes_state.json
-          echo "File size: $(wc -c < debug/nodes_state.json) bytes"
-          cat debug/nodes_state.json | head -50
-          git config user.email "actions@github.com"
-          git config user.name "GitHub Actions"
-          git add debug/nodes_state.json
-          git diff --staged --quiet || git commit -m "debug: nodes state $(date '+%Y-%m-%d %H:%M')"
-          git push
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/verify_state.py 2>&1" > /tmp/nodes_state.json
+          echo "File size: $(wc -c < /tmp/nodes_state.json) bytes"
+          head -120 /tmp/nodes_state.json
+      - name: Commit via GitHub API
+        env:
+          GH_PAT: ${{ secrets.GH_TOKEN }}
+        run: python3 scripts/commit_nodes.py
