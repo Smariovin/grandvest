@@ -1,0 +1,22 @@
+name: Grandvest Publisher
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Post text"
+        required: true
+      image_url:
+        description: "Image URL"
+        required: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MSG: ${{ github.event.inputs.message }}
+          IMG: ${{ github.event.inputs.image_url }}
+        run: python3 scripts/tg_send.py
