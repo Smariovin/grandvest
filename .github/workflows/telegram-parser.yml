@@ -4,7 +4,6 @@ on:
     - cron: "*/30 * * * *"
     - cron: "0 5 * * *"
   workflow_dispatch:
-
 jobs:
   parse:
     runs-on: ubuntu-latest
@@ -16,13 +15,38 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Guardian check
+      - name: Quick health check and fix
         env:
-          GH_PAT: ${{ secrets.GH_TOKEN }}
+          WORKING_PAT: ${{ secrets.GH_TOKEN }}
         run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no             scripts/grandvest_guardian.py root@85.239.61.157:/tmp/grandvest_guardian.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no             root@85.239.61.157 "GH_PAT=$GH_PAT python3 /tmp/grandvest_guardian.py 2>&1" || true
-      - name: Run scheduler
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "
+            # Проверяем узел 9 — если нужно, быстро патчим
+            python3 -c "
+import sqlite3,json,re,os
+DB='/opt/n8n/n8n_data/database.sqlite'
+PAT=os.environ.get('WORKING_PAT','')
+conn=sqlite3.connect(DB)
+cur=conn.cursor()
+cur.execute("SELECT nodes FROM workflow_entity WHERE id='F24jvKiXJIs4wRiZ'")
+nodes_raw=cur.fetchone()[0]
+nodes=json.loads(nodes_raw)
+changed=False
+for n in nodes:
+    nm=n.get('name','')
+    code=n.get('parameters',{}).get('jsCode',n.get('parameters',{}).get('code',''))
+    if ('Отправка' in nm and 'Telegram' in nm) or ('9.' in nm and 'Telegram' in nm):
+        tokens=re.findall(r'ghp_[A-Za-z0-9]{10,}',code)
+        bad=[t for t in tokens if t!=PAT]
+        if bad and PAT:
+            for old in bad: nodes_raw=nodes_raw.replace(old,PAT)
+            cur.execute("UPDATE workflow_entity SET nodes=? WHERE id='F24jvKiXJIs4wRiZ'",(nodes_raw,))
+            changed=True
+            print(f'Fixed tokens: {bad}')
+if changed: conn.commit()
+conn.close()
+" 2>&1 || true
+          " 2>&1 || true
+      - name: Run smart scheduler
         run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no             scripts/scheduler.py root@85.239.61.157:/tmp/scheduler.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no             root@85.239.61.157 "python3 /tmp/scheduler.py 2>&1"
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/scheduler.py root@85.239.61.157:/tmp/scheduler.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/scheduler.py 2>&1"
