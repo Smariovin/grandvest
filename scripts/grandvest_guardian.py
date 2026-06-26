@@ -157,9 +157,12 @@ def fix_openrouter_body(params, node_name):
     try:
         # Убираем n8n expression обёртку если есть ={{...}}
         clean = jb_str.strip()
-        if clean.startswith('={{') and clean.endswith('}}'):
-            # Это n8n expression — нельзя менять напрямую
-            print(f'  ℹ️  {node_name}: jsonBody — n8n Expression, пропускаем')
+        # Убираем n8n Expression prefix '=' если есть
+        if clean.startswith('='):
+            clean = clean[1:].strip()
+            print(f'  ℹ️  {node_name}: stripped Expression prefix')
+        if not clean or clean in ('{}', '""'):
+            print(f'  ⚠️  {node_name}: jsonBody пустой после strip')
             return None, None
 
         body = json.loads(clean)
@@ -244,10 +247,19 @@ else:
     print("  ✅ Login OK")
 
     # ── 3. Обходим ОБА workflow ───────────────────────────
-    WORKFLOWS = {
-        WF_PARSER: 'Парсер Telegram',
-        WF_RSS:    'Сбор новостей RSS'
-    }
+    # Получаем список всех workflows динамически
+    all_wfs_r = subprocess.run(['curl','-s','-b','/tmp/n8n_ck.txt',
+        'http://localhost:5678/rest/workflows'],
+        capture_output=True, text=True, timeout=15)
+    try:
+        all_wfs_d = json.loads(all_wfs_r.stdout)
+        WORKFLOWS = {}
+        for wfi in all_wfs_d.get('data', []):
+            WORKFLOWS[wfi['id']] = wfi['name']
+        print(f"  Found {len(WORKFLOWS)} workflows: {list(WORKFLOWS.values())}")
+    except:
+        WORKFLOWS = {WF_PARSER: 'Парсер Telegram', WF_RSS: 'Сбор новостей RSS'}
+        print(f"  Using default workflow IDs")
 
     for wf_id, wf_label in WORKFLOWS.items():
         print(f"\n[3] Workflow: {wf_label} ({wf_id})")
