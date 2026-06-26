@@ -246,6 +246,66 @@ if not n8n_login():
 else:
     print("  ✅ Login OK")
 
+    # ── 2b. SQLite прямой патч (гарантирует что патч держится) ──
+    print("
+[2b] SQLite direct patch...")
+    try:
+        import sqlite3 as _sq
+        _conn = _sq.connect(DB)
+        _cur = _conn.cursor()
+        _cur.execute("SELECT id, name, nodes FROM workflow_entity")
+        _sql_fixes = []
+        for _wid, _wname, _nraw in _cur.fetchall():
+            try: _nodes = json.loads(_nraw)
+            except: continue
+            _chg = False
+            for _n in _nodes:
+                _nm = _n.get("name","")
+                _tp = _n.get("type","")
+                _pr = _n.get("parameters",{})
+                _cd = _pr.get("jsCode", _pr.get("code",""))
+                _url = _pr.get("url","")
+                # Узел 9
+                if ("Отправка" in _nm and "Telegram" in _nm) or ("9." in _nm and "Telegram" in _nm):
+                    if "api.telegram.org" in _cd or "sendPhoto" in _cd:
+                        if GH_PAT:
+                            _n["parameters"]["jsCode"] = get_node9_code(GH_PAT)
+                            _n["parameters"].pop("code", None)
+                            _chg = True
+                            _sql_fixes.append(f"SQLite [{_wname}] Node9 fixed")
+                # OpenRouter
+                if "httpRequest" in _tp and "openrouter" in _url.lower():
+                    _jb = str(_pr.get("jsonBody","")).strip()
+                    if _jb.startswith("="): _jb = _jb[1:].strip()
+                    try:
+                        _body = json.loads(_jb)
+                        _mt = _body.get("max_tokens",0)
+                        _sok = any("ТРЕБОВАНИЯ" in str(m.get("content","")) and "900" in str(m.get("content",""))
+                                   for m in _body.get("messages",[]) if m.get("role")=="system")
+                        if _mt < 2048 or not _sok:
+                            _body["max_tokens"] = 2048
+                            for _m in _body.get("messages",[]):
+                                if _m.get("role")=="system": _m["content"] = CORRECT_PROMPT
+                            _pr["jsonBody"] = json.dumps(_body, ensure_ascii=False)
+                            _n["parameters"] = _pr
+                            _chg = True
+                            _sql_fixes.append(f"SQLite [{_wname}] '{_nm}' gen fixed")
+                    except: pass
+            if _chg:
+                _cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?",
+                             (json.dumps(_nodes, ensure_ascii=False), _wid))
+        _cur.execute("UPDATE workflow_entity SET active=1")
+        _conn.commit()
+        _conn.close()
+        if _sql_fixes:
+            print(f"  SQLite fixes: {_sql_fixes}")
+            fixes.extend(_sql_fixes)
+        else:
+            print(f"  SQLite: all OK")
+    except Exception as _e:
+        print(f"  SQLite patch error: {_e}")
+
+
     # ── 3. Обходим ОБА workflow ───────────────────────────
     # Получаем список всех workflows динамически
     all_wfs_r = subprocess.run(['curl','-s','-b','/tmp/n8n_ck.txt',
