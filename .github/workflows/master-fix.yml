@@ -1,0 +1,20 @@
+name: Master Fix
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
+      - name: Master fix all workflows
+        env:
+          GH_PAT: ${{ secrets.GH_TOKEN }}
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/master_fix.sh root@85.239.61.157:/tmp/master_fix.sh
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "GH_PAT=$GH_PAT bash /tmp/master_fix.sh 2>&1"
