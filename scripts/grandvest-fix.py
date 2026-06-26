@@ -12,7 +12,6 @@ def tg(m):
         data = urllib.parse.urlencode({"chat_id": CID, "text": m, "parse_mode": "HTML"}).encode()
         req = urllib.request.Request(url, data=data, method="POST")
         urllib.request.urlopen(req, timeout=10)
-        print("TG sent OK")
     except Exception as e:
         print("TG error:", e)
 
@@ -28,7 +27,7 @@ try:
         changed = False
         if not active:
             cur.execute("UPDATE workflow_entity SET active=1 WHERE id=?", (wid,))
-            fixes.append("Активирован: " + wname)
+            fixes.append("Activated: " + wname)
         for n in nodes:
             nm = n.get("name", "")
             nt = n.get("type", "")
@@ -37,8 +36,8 @@ try:
                 if "*/5" in cur_s or "*/30" in cur_s or "cronExpression" not in cur_s:
                     n["parameters"] = SCH
                     changed = True
-                    fixes.append("Расписание исправлено: " + wname)
-            if "\u041e\u0442\u043f\u0440\u0430\u0432\u043a\u0430" in nm:
+                    fixes.append("Schedule fixed: " + wname)
+            # Node 9 (Otpravka) - DO NOT TOUCH, managed by grandvest-publisher.yml
         if changed:
             cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?",
                         (json.dumps(nodes, ensure_ascii=False), wid))
@@ -52,15 +51,17 @@ except Exception as e:
 
 try:
     urllib.request.urlopen("http://localhost:5678/healthz", timeout=5)
-    ui = "Dostupен"
+    ui = "OK"
 except:
-    ui = "Nedostupen"
+    ui = "DOWN"
 
 now = datetime.now().strftime("%d.%m.%Y %H:%M")
-if fixes:
-    msg = "Grandvest Agent - Ispravleniya\n\n" + "\n".join(fixes) + "\n\nn8n: " + ui + "\n" + now + " MSK"
-else:
-    msg = "Grandvest Agent - OK\n\n" + "\n".join(status) + "\n\nn8n: " + ui + "\n" + now + " MSK"
-
+patchi = "\n".join(fixes) if fixes else "none"
+msg = (
+    "Agent Grandvest\n\n"
+    "n8n: " + ui + "\n"
+    "Fixes: " + patchi + "\n"
+    + now + " MSK"
+)
 tg(msg)
 print("Done:", fixes if fixes else "OK")
