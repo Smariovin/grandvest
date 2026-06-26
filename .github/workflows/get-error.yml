@@ -1,0 +1,18 @@
+name: Get Error
+on:
+  workflow_dispatch:
+jobs:
+  get:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
+      - name: Get error details
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/get_error.sh root@85.239.61.157:/tmp/get_error.sh
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "bash /tmp/get_error.sh 2>&1"
