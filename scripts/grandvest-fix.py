@@ -4,7 +4,6 @@ from datetime import datetime
 DB = "/opt/n8n/n8n_data/database.sqlite"
 BOT = "8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw"
 CID = "5340000158"
-CODE = 'const postText=$("8. \u041f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0430 \u0434\u0430\u043d\u043d\u044b\u0445 \u043f\u043e\u0441\u0442\u0430").first().json.tg_post;\nconst imageUrl=$("HTTP Request \u2014 fal.ai").first().json.images[0].url;\nconst botToken="8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw";\nconst chatId="-1003971323034";\nconst resp=await fetch("https://api.telegram.org/bot"+botToken+"/sendPhoto",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,photo:imageUrl,caption:postText,parse_mode:"HTML"})});\nconst result=await resp.json();\nreturn [{json:result}];'
 SCH = {"rule": {"interval": [{"field": "cronExpression", "expression": "0 0 8-20 * * *"}]}}
 
 def tg(m):
