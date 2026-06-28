@@ -13,10 +13,10 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Fix fs and run
+      - name: Fix and run
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: "5340000158"
         run: |
-          scp -o StrictHostKeyChecking=no scripts/fix_fs_and_run.py root@85.239.61.157:/root/fix_fs_run.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT python3 /root/fix_fs_run.py 2>&1"
+          scp -o StrictHostKeyChecking=no scripts/fix_fs_and_run.py root@85.239.61.157:/root/ffr.py
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /root/ffr.py 2>&1"
