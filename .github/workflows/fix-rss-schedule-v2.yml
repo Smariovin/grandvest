@@ -1,0 +1,19 @@
+name: Fix RSS Schedule V2
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
+      - name: Fix RSS schedule
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/fix_rss_schedule_v2.py root@85.239.61.157:/tmp/fix_rss_schedule_v2.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/fix_rss_schedule_v2.py 2>&1"
