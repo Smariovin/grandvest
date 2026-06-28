@@ -1,12 +1,12 @@
 name: Telegram Parser
 on:
   schedule:
-    - cron: "0 * * * *"
-    - cron: "0 5 * * *"
+    - cron: "1 * * * *"
   workflow_dispatch:
 jobs:
   parse:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Setup SSH
@@ -15,7 +15,7 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Run scheduler v3
+      - name: Run scheduler v4
         run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/scheduler.py root@85.239.61.157:/tmp/scheduler.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/scheduler.py 2>&1"
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no             scripts/scheduler.py root@85.239.61.157:/tmp/scheduler.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no             root@85.239.61.157 "python3 /tmp/scheduler.py 2>&1"
