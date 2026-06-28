@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
-Grandvest Scheduler v4
-Логика:
-- Запускается каждые 60 мин (cron: 0 * * * *)
-- 08:01-21:00 МСК: парсит новости за ПОСЛЕДНИЙ ЧАС → публикует сразу
-- 21:01-07:59 МСК: парсит → в ночной буфер
-- 08:00-08:14 МСК: публикует ночной буфер → затем парсит текущий час
+Grandvest Scheduler v5
+Исправление: отправляем в n8n только последний пост за период,
+а не всю HTML страницу канала
 """
 import json, os, datetime, urllib.request, urllib.parse, time, gzip, re
 
@@ -24,10 +21,10 @@ def now_msk():
     utc = datetime.datetime.now(datetime.timezone.utc)
     return utc + datetime.timedelta(hours=3)
 
-def tg(msg, chat=MY_CHAT):
+def tg(msg):
     url = f'https://api.telegram.org/bot{BOT}/sendMessage'
     data = urllib.parse.urlencode({
-        'chat_id': chat, 'text': str(msg)[:4000],
+        'chat_id': MY_CHAT, 'text': str(msg)[:4000],
         'parse_mode': 'HTML', 'disable_web_page_preview': True
     }).encode()
     try:
@@ -59,71 +56,108 @@ def save_buffer(items):
 
 def parse_channel(channel, from_dt, to_dt):
     """
-    Парсит канал и фильтрует посты за период from_dt..to_dt (объекты datetime MSK)
-    Возвращает (html_страницы, список постов за период, превью последнего)
+    Возвращает список постов за период from_dt..to_dt
+    Каждый пост: {'html': '<div class=tgme_widget_message_text...>', 'time': ..., 'text': ...}
     """
     try:
         req = urllib.request.Request(
             f'https://t.me/s/{channel}',
             headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept-Encoding': 'gzip, deflate',
                 'Accept': 'text/html,application/xhtml+xml'
             }
         )
         with urllib.request.urlopen(req, timeout=20) as r:
             raw = r.read()
-            try: html = gzip.decompress(raw).decode('utf-8', errors='replace')
-            except: html = raw.decode('utf-8', errors='replace')
+            try: page = gzip.decompress(raw).decode('utf-8', errors='replace')
+            except: page = raw.decode('utf-8', errors='replace')
 
-        if len(html) < 500:
-            return None, [], ''
+        if len(page) < 500:
+            return []
 
-        # Извлекаем посты с временем из <time datetime="...">
+        # Ищем блоки сообщений с временными метками
+        # Формат: <div class="tgme_widget_message ...">...<time datetime="2026-06-28T...">
         posts = []
-        # Ищем блоки сообщений
-        msg_blocks = re.findall(
-            r'<div class="tgme_widget_message_wrap[^"]*".*?</div>\s*</div>\s*</div>',
-            html, re.DOTALL
+
+        # Разбиваем на отдельные сообщения
+        msg_pattern = re.compile(
+            r'(<div class="tgme_widget_message_wrap[^>]*>.*?</div>\s*</div>\s*</div>)',
+            re.DOTALL
         )
 
-        for block in msg_blocks:
+        for block in msg_pattern.finditer(page):
+            block_html = block.group(1)
+
             # Время поста
-            time_match = re.search(r'<time[^>]+datetime="([^"]+)"', block)
-            if not time_match:
+            time_m = re.search(r'<time[^>]+datetime="([^"]+)"', block_html)
+            if not time_m:
                 continue
             try:
-                dt_str = time_match.group(1)  # e.g. 2026-06-28T07:30:00+00:00
-                post_utc = datetime.datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+                dt_raw = time_m.group(1)
+                post_utc = datetime.datetime.fromisoformat(dt_raw.replace('Z', '+00:00'))
                 post_msk = post_utc + datetime.timedelta(hours=3)
             except:
                 continue
 
-            # Фильтр по времени
-            if from_dt <= post_msk <= to_dt:
-                text_match = re.search(
-                    r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
-                    block, re.DOTALL
-                )
-                text = ''
-                if text_match:
-                    text = re.sub(r'<[^>]+>', '', text_match.group(1)).strip()[:200]
-                posts.append({
-                    'time_msk': post_msk.strftime('%H:%M'),
-                    'text': text
-                })
+            # Фильтр по временному окну
+            if not (from_dt <= post_msk <= to_dt):
+                continue
 
-        preview = posts[-1]['text'][:80] if posts else ''
-        return html, posts, preview
+            # Извлекаем div с текстом поста
+            text_div_m = re.search(
+                r'(<div class="tgme_widget_message_text[^"]*"[^>]*>.*?</div>)',
+                block_html, re.DOTALL
+            )
+            if not text_div_m:
+                continue
+
+            text_div = text_div_m.group(1)
+            text_clean = re.sub(r'<[^>]+>', '', text_div).strip()
+
+            if len(text_clean) < 20:  # Слишком короткое сообщение
+                continue
+
+            # Ссылка на пост
+            link_m = re.search(r'href="(https://t\.me/[^"]+)"', block_html)
+            post_url = link_m.group(1) if link_m else f'https://t.me/{channel}'
+
+            posts.append({
+                'text_div': text_div,
+                'text': text_clean[:300],
+                'time_msk': post_msk.strftime('%H:%M'),
+                'post_url': post_url,
+                'channel': channel,
+                'channel_url': f'https://t.me/{channel}'
+            })
+
+        return posts
 
     except Exception as e:
-        print(f'  parse error {channel}: {e}')
-        return None, [], ''
+        print(f'  parse error @{channel}: {e}')
+        return []
 
-def send_to_n8n(channel, html):
-    payload = json.dumps(
-        {'channel': channel, 'html': html}, ensure_ascii=False
-    ).encode('utf-8')
+def send_post_to_n8n(channel, post):
+    """
+    Отправляем ОДИН пост в n8n вебхук в правильном формате
+    Формат: {channel, html} - где html это только div с текстом поста + time тег
+    """
+    # Формируем HTML в том формате который ожидает узел 1
+    time_str = post['time_msk']
+    html_payload = (
+        f'<div class="tgme_widget_message_text js-message_text">'
+        f'{post["text"]}'
+        f'</div>'
+        f'<time datetime="2026-06-28T{time_str}:00+00:00">{time_str}</time>'
+    )
+
+    payload = json.dumps({
+        'channel': channel,
+        'html': html_payload,
+        'source_url': post.get('post_url', f'https://t.me/{channel}'),
+        'channel_url': post.get('channel_url', f'https://t.me/{channel}')
+    }, ensure_ascii=False).encode('utf-8')
+
     try:
         req = urllib.request.Request(
             'http://localhost:5678/webhook/telegram-parser',
@@ -137,180 +171,119 @@ def send_to_n8n(channel, html):
         print(f'  n8n error: {e}')
         return False
 
-def notify(channel, posts_count, period_str, msk_now, buffered=False):
-    status = '🌙 В ночной буфер' if buffered else '📢 Опубликовано сразу'
-    tg(
-        f'📰 <b>{"Буфер" if buffered else "Публикация"} | {PARSER_NAME}</b>\n\n'
-        f'📌 @{channel}\n'
-        f'⏰ Время: {msk_now.strftime("%H:%M")} МСК\n'
-        f'📅 Период новостей: {period_str}\n'
-        f'📊 Постов за период: {posts_count}\n'
-        f'🔄 {status}'
-    )
-
 # ═══════════════════════════════
 msk = now_msk()
 h = msk.hour
 m = msk.minute
 
-print(f"=== Scheduler v4 | {msk.strftime('%d.%m.%Y %H:%M')} МСК ===")
+print(f"=== Scheduler v5 | {msk.strftime('%d.%m.%Y %H:%M')} МСК ===")
 
-# Определяем период для парсинга (последний час)
-# Если сейчас 10:05 — берём посты с 09:01 по 10:00
+# Период парсинга: последний час
 period_to = msk.replace(minute=0, second=0, microsecond=0)
 period_from = period_to - datetime.timedelta(hours=1) + datetime.timedelta(minutes=1)
 period_str = f'{period_from.strftime("%H:%M")}–{period_to.strftime("%H:%M")}'
-print(f"Период парсинга: {period_str} МСК")
+print(f"Период: {period_str} МСК")
 
-# Режимы
-IS_WORK = 8 <= h < 21  # 08:00-20:59 → публикуем
-IS_MORNING = h == 8 and m < 15  # 08:00-08:14 → сброс буфера
+IS_WORK = 8 <= h < 21
+IS_MORNING = h == 8 and m < 15
 
-print(f"Режим: {'РАБОТА' if IS_WORK else 'НОЧЬ'} | Утренний сброс: {IS_MORNING}")
+print(f"Режим: {'ПУБЛИКАЦИЯ' if IS_WORK else 'НОЧЬ'} | Утро: {IS_MORNING}")
 
-# ─── ШАГ 1: Утренний сброс буфера ───
+# ─── Утренний сброс буфера ───
 if IS_MORNING:
     buffer = load_buffer()
     if buffer:
-        print(f"\n🌅 Утренний сброс: {len(buffer)} каналов")
+        print(f"\n🌅 Утренний сброс: {len(buffer)} постов")
         ok = 0
         for item in buffer:
             ch = item.get('channel', '?')
-            html = item.get('html', '')
-            posts_count = item.get('posts_count', 0)
-            buf_period = item.get('period', '?')
-            buf_time = item.get('ts', '?')
-
-            if html and send_to_n8n(ch, html):
+            if send_post_to_n8n(ch, item):
                 ok += 1
-                print(f"  ✓ @{ch}")
-                log_pub({
-                    'time_msk': msk.strftime('%d.%m.%Y %H:%M'),
-                    'channel': ch,
-                    'channel_url': f'https://t.me/{ch}',
-                    'parser': PARSER_NAME,
-                    'status': 'published_from_buffer',
-                    'period': buf_period,
-                    'buffered_at': buf_time,
-                    'posts_count': posts_count
-                })
-                tg(
-                    f'🌅 <b>Из ночного буфера</b>\n\n'
-                    f'📌 @{ch}\n'
-                    f'⏰ Публикация: 08:01 МСК\n'
-                    f'📅 Новости за: {buf_period}\n'
-                    f'📊 Постов: {posts_count}\n'
-                    f'🔗 https://t.me/{ch}'
-                )
+                print(f"  ✓ @{ch} [{item.get('time_msk','?')}]")
                 time.sleep(5)
-
         save_buffer([])
-        tg(
-            f'🌅 <b>Утренний сброс завершён</b>\n'
-            f'Опубликовано: {ok}/{len(buffer)} каналов\n'
-            f'Новости за период 21:01–08:00 МСК'
-        )
+        tg(f'🌅 <b>Утренний сброс</b>\nОпубликовано: {ok}/{len(buffer)} постов\n'
+           f'Период: 21:01–08:00 МСК')
     else:
         print("Буфер пуст")
 
-# ─── ШАГ 2: Парсинг каналов ───
+# ─── Парсинг каналов ───
 print(f"\n📡 Парсинг {len(CHANNELS)} каналов за {period_str}...")
 
 night_buffer = load_buffer() if not IS_WORK else []
-total_published = 0
-total_buffered = 0
-total_no_news = 0
+published = 0
+buffered = 0
+no_news = 0
 channel_report = []
 
 for channel in CHANNELS:
     print(f"  @{channel}...", end=' ', flush=True)
+    posts = parse_channel(channel, period_from, period_to)
 
-    html, posts, preview = parse_channel(channel, period_from, period_to)
-
-    if html is None:
-        print("FAIL — недоступен")
-        channel_report.append(f'❌ @{channel}: недоступен')
+    if posts is None or (isinstance(posts, list) and len(posts) == 0):
+        print(f"нет постов за {period_str}")
+        channel_report.append(f'⚪ @{channel}: нет новых постов за {period_str}')
+        no_news += 1
         continue
 
-    posts_count = len(posts)
-    print(f"{posts_count} постов за период", end=' ')
-
-    if posts_count == 0:
-        print("→ нет новых постов")
-        channel_report.append(f'⚪ @{channel}: нет постов за {period_str}')
-        total_no_news += 1
-        continue
+    # Берём последний пост за период
+    post = posts[-1]
+    print(f"{len(posts)} пост(ов) → берём последний [{post['time_msk']}]")
 
     if IS_WORK:
-        # Рабочее время — публикуем сразу
-        if send_to_n8n(channel, html):
-            print("→ опубликовано ✓")
-            total_published += 1
+        if send_post_to_n8n(channel, post):
+            published += 1
             channel_report.append(
-                f'✅ @{channel}: {posts_count} постов → опубликовано'
+                f'✅ @{channel}: опубликован пост {post["time_msk"]} МСК\n'
+                f'   💬 {post["text"][:60]}...'
             )
             log_pub({
                 'time_msk': msk.strftime('%d.%m.%Y %H:%M'),
                 'channel': channel,
                 'channel_url': f'https://t.me/{channel}',
+                'post_url': post.get('post_url',''),
                 'parser': PARSER_NAME,
                 'status': 'published',
                 'period': period_str,
-                'posts_count': posts_count,
-                'preview': preview[:100]
+                'posts_count': len(posts),
+                'preview': post['text'][:100]
             })
+            # Уведомление — новость отправлена в обработку
             tg(
-                f'📢 <b>Новость опубликована</b>\n\n'
+                f'📰 <b>Новость отправлена в обработку</b>\n\n'
                 f'📡 Парсер: {PARSER_NAME}\n'
-                f'📌 Источник: @{channel}\n'
-                f'🔗 https://t.me/{channel}\n'
-                f'⏰ Время: {msk.strftime("%H:%M")} МСК\n'
-                f'📅 Новости за: {period_str}\n'
-                f'📊 Постов найдено: {posts_count}\n'
-                f'💬 {preview[:80]}'
+                f'📌 Источник: <a href="https://t.me/{channel}">@{channel}</a>\n'
+                f'🔗 Пост: <a href="{post.get("post_url", f"https://t.me/{channel}")}">открыть</a>\n'
+                f'⏰ Время новости: {post["time_msk"]} МСК\n'
+                f'📅 Период: {period_str}\n'
+                f'💬 {post["text"][:80]}...'
             )
         else:
-            print("→ FAIL")
-            channel_report.append(f'⚠️ @{channel}: ошибка отправки в n8n')
+            channel_report.append(f'⚠️ @{channel}: ошибка n8n')
         time.sleep(4)
     else:
-        # Ночное время — в буфер
+        # Ночной буфер — убираем старую запись канала
         night_buffer = [x for x in night_buffer if x.get('channel') != channel]
-        night_buffer.append({
-            'channel': channel,
-            'html': html,
-            'preview': preview,
-            'period': period_str,
-            'posts_count': posts_count,
-            'ts': msk.strftime('%d.%m.%Y %H:%M МСК')
-        })
-        print("→ в буфер")
-        total_buffered += 1
-        channel_report.append(
-            f'🌙 @{channel}: {posts_count} постов → буфер'
-        )
+        night_buffer.append({**post, 'channel': channel, 'period': period_str,
+                              'ts': msk.strftime('%d.%m.%Y %H:%M МСК')})
+        buffered += 1
+        channel_report.append(f'🌙 @{channel}: {len(posts)} постов → буфер')
 
-# Сохраняем буфер
 if not IS_WORK:
     save_buffer(night_buffer)
 
-# ─── Итоговый отчёт часа ───
+# ─── Итоговый почасовой отчёт ───
 report = [
     f'📊 <b>Отчёт парсинга {period_str} МСК</b>',
-    f'📅 {msk.strftime("%d.%m.%Y")} | {PARSER_NAME}',
-    ''
+    f'🗓 {msk.strftime("%d.%m.%Y")} | {PARSER_NAME}', ''
 ]
-
 if IS_WORK:
-    report.append(f'✅ Опубликовано: {total_published}')
+    report.append(f'✅ Отправлено в публикацию: {published}')
 else:
-    report.append(f'🌙 В буфер: {total_buffered}')
-
-report.append(f'⚪ Без новостей: {total_no_news}')
-report.append(f'❌ Ошибки: {len(CHANNELS)-total_published-total_buffered-total_no_news}')
+    report.append(f'🌙 В ночной буфер: {buffered}')
+report.append(f'⚪ Без новостей за период: {no_news}')
 report.append('')
 report.append('<b>По каналам:</b>')
 report.extend(channel_report)
-
 tg('\n'.join(report))
-print(f"\nГотово: опубликовано={total_published} буфер={total_buffered} пусто={total_no_news}")
+print(f"Готово: published={published} buffered={buffered} no_news={no_news}")
