@@ -4,7 +4,7 @@ on:
 jobs:
   fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Setup SSH
@@ -13,11 +13,11 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Root cause fix
+      - name: RSS Diagnostic
         env:
-          GH_PAT: ${{ secrets.GH_TOKEN }}
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: "5340000158"
+          OR_KEY: ${{ secrets.OPENROUTER_KEY }}
         run: |
-          scp -o StrictHostKeyChecking=no scripts/root_cause_fix.py root@85.239.61.157:/root/root_cause_fix.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "GH_PAT=$GH_PAT TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT python3 /root/root_cause_fix.py 2>&1"
+          scp -o StrictHostKeyChecking=no scripts/rss_diagnostic.py root@85.239.61.157:/root/rss_diag.py
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT OR_KEY=$OR_KEY python3 /root/rss_diag.py 2>&1"
