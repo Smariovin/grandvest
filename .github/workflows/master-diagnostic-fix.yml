@@ -13,10 +13,10 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Simple RSS check
+      - name: SQLite RSS check
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: "5340000158"
         run: |
-          scp -o StrictHostKeyChecking=no scripts/rss_simple_check.py root@85.239.61.157:/root/rss_simple_check.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT python3 /root/rss_simple_check.py 2>&1"
+          scp -o StrictHostKeyChecking=no scripts/sqlite_rss_check.py root@85.239.61.157:/root/sqlite_rss_check.py
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT python3 /root/sqlite_rss_check.py 2>&1"
