@@ -16,6 +16,8 @@ jobs:
       - name: Run master fix via SSH
         env:
           GH_PAT: ${{ secrets.GH_TOKEN }}
+          TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: "5340000158"
         run: |
           scp -o StrictHostKeyChecking=no scripts/master_fix_v2.py root@85.239.61.157:/root/master_fix_v2.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "GH_PAT=$GH_PAT python3 /root/master_fix_v2.py 2>&1"
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "GH_PAT=$GH_PAT TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT python3 /root/master_fix_v2.py 2>&1"
