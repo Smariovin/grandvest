@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Grandvest Smart Scheduler v2
-Расписание: публикация 08:00-21:00 МСК, 7 дней в неделю
-Ночью 21:01-07:59 — парсим в буфер, публикуем в 08:00
+Grandvest Scheduler v3
+- Парсит Telegram каналы каждые 60 мин
+- 08:00-21:00 МСК: публикует сразу
+- 21:01-07:59 МСК: складывает в буфер
+- 08:00-08:14 МСК: публикует буфер
+- После публикации: шлёт отчёт в личку
 """
-import json, os, datetime, urllib.request, urllib.parse, time, gzip
+import json, os, datetime, urllib.request, urllib.parse, time, gzip, re
 
 BUFFER_FILE = '/data/night_buffer.json'
+LOG_FILE = '/data/published_log.json'
 BOT = '8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw'
 MY_CHAT = '5340000158'
+PARSER_NAME = 'Парсер Telegram'
 
 CHANNELS = [
     'CRERussia', 'officenewsdaily', 'nedvirf', 'arendator_ru',
@@ -17,59 +22,45 @@ CHANNELS = [
 
 def now_msk():
     utc = datetime.datetime.now(datetime.timezone.utc)
-    msk = utc + datetime.timedelta(hours=3)
-    return msk
+    return utc + datetime.timedelta(hours=3)
 
-def tg_log(msg):
+def tg(msg, chat=MY_CHAT):
     url = f'https://api.telegram.org/bot{BOT}/sendMessage'
-    data = urllib.parse.urlencode({
-        'chat_id': MY_CHAT,
-        'text': msg[:1000],
-        'parse_mode': 'HTML'
-    }).encode()
-    try:
-        urllib.request.urlopen(
-            urllib.request.Request(url, data=data, method='POST'), timeout=10)
-    except Exception as e:
-        print(f'TG log error: {e}')
+    data = urllib.parse.urlencode({'chat_id': chat, 'text': str(msg)[:4000], 'parse_mode': 'HTML', 'disable_web_page_preview': True}).encode()
+    try: urllib.request.urlopen(urllib.request.Request(url, data=data, method='POST'), timeout=10)
+    except: pass
 
-def is_publish_time(msk_dt):
-    """08:00–21:00 МСК — рабочее время, публикуем сразу"""
+def log_publication(entry):
+    """Логируем публикацию для отчёта"""
+    logs = []
+    try:
+        if os.path.exists(LOG_FILE):
+            with open(LOG_FILE) as f: logs = json.load(f)
+    except: pass
+    logs.append(entry)
+    if len(logs) > 200: logs = logs[-150:]
+    os.makedirs('/data', exist_ok=True)
+    with open(LOG_FILE, 'w') as f: json.dump(logs, f, ensure_ascii=False, indent=2)
+
+def is_work_time(msk_dt):
+    """08:00–20:59 МСК — рабочее время"""
     return 8 <= msk_dt.hour < 21
 
 def is_morning_flush(msk_dt):
-    """08:00–08:14 МСК — утренний сброс ночного буфера"""
-    return msk_dt.hour == 8 and msk_dt.minute < 15
+    """08:00–08:29 МСК — утренний сброс буфера"""
+    return msk_dt.hour == 8 and msk_dt.minute < 30
 
 def load_buffer():
     try:
-        with open(BUFFER_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except:
-        return []
+        with open(BUFFER_FILE, 'r') as f: return json.load(f)
+    except: return []
 
 def save_buffer(items):
     os.makedirs('/data', exist_ok=True)
-    with open(BUFFER_FILE, 'w', encoding='utf-8') as f:
-        json.dump(items, f, ensure_ascii=False)
+    with open(BUFFER_FILE, 'w') as f: json.dump(items, f, ensure_ascii=False)
 
-def send_to_n8n(channel, html):
-    payload = json.dumps(
-        {'channel': channel, 'html': html},
-        ensure_ascii=False
-    ).encode('utf-8')
-    try:
-        req = urllib.request.Request(
-            'http://localhost:5678/webhook/telegram-parser',
-            data=payload,
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-        urllib.request.urlopen(req, timeout=30)
-        return True
-    except Exception as e:
-        print(f'  n8n error: {e}')
-        return False
+def get_channel_url(channel):
+    return f'https://t.me/s/{channel}'
 
 def parse_channel(channel):
     try:
@@ -83,102 +74,132 @@ def parse_channel(channel):
         )
         with urllib.request.urlopen(req, timeout=20) as r:
             raw = r.read()
-            try:
-                html = gzip.decompress(raw).decode('utf-8', errors='replace')
-            except:
-                html = raw.decode('utf-8', errors='replace')
-        return html if len(html) > 500 else None
+            try: html = gzip.decompress(raw).decode('utf-8', errors='replace')
+            except: html = raw.decode('utf-8', errors='replace')
+        
+        # Извлекаем последний пост для логирования
+        post_match = re.search(r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
+        last_post_preview = ''
+        if post_match:
+            last_post_preview = re.sub(r'<[^>]+>', '', post_match.group(1))[:80].strip()
+        
+        return html if len(html) > 500 else None, last_post_preview
     except Exception as e:
-        print(f'  parse error: {e}')
-        return None
+        return None, ''
 
-# ─────────────────────────────────────────────
+def send_to_n8n(channel, html):
+    payload = json.dumps({'channel': channel, 'html': html}, ensure_ascii=False).encode('utf-8')
+    try:
+        req = urllib.request.Request(
+            'http://localhost:5678/webhook/telegram-parser',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        urllib.request.urlopen(req, timeout=30)
+        return True
+    except Exception as e:
+        print(f'  n8n error: {e}')
+        return False
+
+def notify_published(channel, post_preview, msk_time, buffered=False):
+    """Уведомление о публикации в личку"""
+    channel_url = f'https://t.me/{channel}'
+    status = '🌙 Из ночного буфера' if buffered else '📢 Опубликовано сразу'
+    msg = (
+        f'📰 <b>Новость отправлена в обработку</b>\n\n'
+        f'⏰ Время: {msk_time} МСК\n'
+        f'📡 Парсер: {PARSER_NAME}\n'
+        f'📌 Канал-источник: <a href="{channel_url}">@{channel}</a>\n'
+        f'🔄 Статус: {status}\n'
+        f'💬 Превью: {post_preview[:100] if post_preview else "—"}'
+    )
+    tg(msg)
+
+# ═══════════════════════════════════════
 msk = now_msk()
-weekday = ['пн','вт','ср','чт','пт','сб','вс'][msk.weekday()]
-publish_mode = is_publish_time(msk)
-morning_flush = is_morning_flush(msk)
+work_time = is_work_time(msk)
+morning = is_morning_flush(msk)
 
-print(f"=== Grandvest Scheduler v2 ===")
-print(f"MSK: {msk.strftime('%d.%m.%Y %H:%M')} ({weekday})")
-print(f"Режим: {'📢 ПУБЛИКАЦИЯ' if publish_mode else '🌙 НОЧНОЙ БУФЕР'}")
-print(f"Утренний сброс: {'ДА' if morning_flush else 'нет'}")
+print(f"=== Scheduler v3 | {msk.strftime('%d.%m.%Y %H:%M')} МСК ===")
+print(f"Режим: {'ПУБЛИКАЦИЯ' if work_time else 'БУФЕР'} | Утро: {morning}")
 
-# ─────────────────────────────────────────────
-# ШАГ 1: Утренний сброс буфера (08:00–08:14 МСК)
-# ─────────────────────────────────────────────
-if morning_flush:
+# ШАГ 1: Утренний сброс буфера 08:00-08:29
+if morning:
     buffer = load_buffer()
     if buffer:
-        print(f"\n🌅 Утренний сброс: {len(buffer)} записей в буфере")
+        print(f"\n🌅 Утренний сброс: {len(buffer)} записей")
         ok = 0
         for item in buffer:
             ch = item.get('channel', '?')
             html = item.get('html', '')
+            preview = item.get('preview', '')
+            buf_time = item.get('ts', '?')
             if html and send_to_n8n(ch, html):
                 ok += 1
-                print(f"  ✓ {ch}")
-                time.sleep(4)
-            else:
-                print(f"  ✗ {ch}")
+                print(f"  ✓ @{ch}")
+                notify_published(ch, preview, msk.strftime('%H:%M'), buffered=True)
+                log_publication({
+                    'time_msk': msk.strftime('%d.%m.%Y %H:%M'),
+                    'channel': ch,
+                    'channel_url': f'https://t.me/{ch}',
+                    'parser': PARSER_NAME,
+                    'status': 'from_buffer',
+                    'buffered_at': buf_time,
+                    'preview': preview[:100]
+                })
+                time.sleep(5)
         save_buffer([])
-        print(f"Буфер очищен. Опубликовано: {ok}/{len(buffer)}")
-        tg_log(
-            f"🌅 <b>Утренний запуск 08:00</b>\n"
-            f"Ночной буфер: {ok} из {len(buffer)} каналов отправлено в n8n\n"
-            f"Буфер очищен ✅"
-        )
+        tg(f'🌅 <b>Утренний сброс завершён</b>\nОпубликовано: {ok}/{len(buffer)} каналов')
     else:
-        print("\n🌅 Утренний сброс: буфер пуст")
+        print("Буфер пуст")
 
-# ─────────────────────────────────────────────
 # ШАГ 2: Парсинг каналов
-# ─────────────────────────────────────────────
 print(f"\n📡 Парсинг {len(CHANNELS)} каналов...")
-
-night_buffer = load_buffer() if not publish_mode else []
-parsed_ok = 0
-buffered = 0
+night_buffer = load_buffer() if not work_time else []
+published = 0
+buffered_count = 0
 
 for channel in CHANNELS:
-    print(f"  {channel}...", end=' ', flush=True)
-    html = parse_channel(channel)
-
+    print(f"  @{channel}...", end=' ', flush=True)
+    html, preview = parse_channel(channel)
     if not html:
-        print("FAIL — пропуск")
+        print("FAIL")
         continue
 
-    if publish_mode:
-        # Рабочее время — сразу в n8n
+    if work_time:
         if send_to_n8n(channel, html):
-            print("→ n8n ✓")
-            parsed_ok += 1
+            print(f"→ опубликовано ✓")
+            published += 1
+            notify_published(channel, preview, msk.strftime('%H:%M'), buffered=False)
+            log_publication({
+                'time_msk': msk.strftime('%d.%m.%Y %H:%M'),
+                'channel': channel,
+                'channel_url': f'https://t.me/{channel}',
+                'parser': PARSER_NAME,
+                'status': 'published',
+                'preview': preview[:100]
+            })
         else:
-            print("→ n8n FAIL")
-        time.sleep(3)
+            print("→ FAIL")
+        time.sleep(4)
     else:
-        # Ночное время — в буфер (перезаписываем, берём свежий HTML)
-        # Убираем старую запись этого канала если есть
         night_buffer = [x for x in night_buffer if x.get('channel') != channel]
         night_buffer.append({
             'channel': channel,
             'html': html,
-            'ts': msk.strftime('%Y-%m-%d %H:%M MSK')
+            'preview': preview,
+            'ts': msk.strftime('%d.%m.%Y %H:%M МСК')
         })
-        print(f"→ буфер ✓")
-        buffered += 1
+        print(f"→ буфер")
+        buffered_count += 1
 
-# Сохраняем ночной буфер
-if not publish_mode:
+if not work_time:
     save_buffer(night_buffer)
-    total_in_buffer = len(night_buffer)
-    print(f"\n💾 Буфер сохранён: {total_in_buffer} каналов")
-    # Логируем только в начале каждого часа чтобы не спамить
-    if msk.minute < 31:
-        tg_log(
-            f"🌙 <b>Ночной буфер</b> {msk.strftime('%H:%M')} МСК\n"
-            f"Добавлено: {buffered} каналов\n"
-            f"Всего в буфере: {total_in_buffer}\n"
-            f"Публикация в 08:00 МСК"
-        )
+    if msk.minute < 30:
+        tg(f'🌙 <b>Ночной буфер</b> {msk.strftime("%H:%M")} МСК\n'
+           f'Добавлено: {buffered_count} каналов\n'
+           f'Всего в буфере: {len(night_buffer)}\n'
+           f'Публикация в 08:00 МСК')
 else:
-    print(f"\n✅ Готово: {parsed_ok}/{len(CHANNELS)} каналов отправлено в n8n")
+    print(f"\n✅ Опубликовано: {published}/{len(CHANNELS)}")
