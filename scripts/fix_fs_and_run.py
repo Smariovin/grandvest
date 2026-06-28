@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Fix ALL Code nodes with require(fs) in RSS workflow"""
 import sqlite3, json, urllib.request, urllib.parse, os, subprocess, time, http.cookiejar
 
 DB = "/opt/n8n/n8n_data/database.sqlite"
@@ -14,39 +13,40 @@ def tg(msg):
     try: urllib.request.urlopen(urllib.request.Request(url,data=data,method="POST"),timeout=15)
     except Exception as e: print("TG err:", e)
 
-# Правильный код дедупликации без require(fs)
-DEDUP_CODE = """const items = $input.all();
-const staticData = $getWorkflowStaticData("global");
-if (!staticData.publishedTitles) staticData.publishedTitles = [];
-const published = staticData.publishedTitles;
-const unique = [];
-for (const item of items) {
-  const title = (item.json.title || item.json.text || "").trim().toLowerCase().substring(0, 80);
-  if (!title) continue;
-  const isDup = published.some(function(p) { return p.substring(0,80) === title; });
-  if (!isDup) unique.push(item);
-  else console.log("Dup skipped:", title.substring(0,40));
-}
-if (staticData.publishedTitles.length > 500) {
-  staticData.publishedTitles = staticData.publishedTitles.slice(-300);
-}
-console.log("Dedup: in=" + items.length + " out=" + unique.length);
-return unique.slice(0, 1);"""
+DEDUP_CODE = (
+    "const items = $input.all();\n"
+    "const staticData = $getWorkflowStaticData(\"global\");\n"
+    "if (!staticData.publishedTitles) staticData.publishedTitles = [];\n"
+    "const published = staticData.publishedTitles;\n"
+    "const unique = [];\n"
+    "for (const item of items) {\n"
+    "  const title = (item.json.title || item.json.text || \"\").trim().toLowerCase().substring(0, 80);\n"
+    "  if (!title) continue;\n"
+    "  const isDup = published.some(function(p) { return p.substring(0,80) === title; });\n"
+    "  if (!isDup) unique.push(item);\n"
+    "  else console.log(\"Dup skipped:\", title.substring(0,40));\n"
+    "}\n"
+    "if (staticData.publishedTitles.length > 500) {\n"
+    "  staticData.publishedTitles = staticData.publishedTitles.slice(-300);\n"
+    "}\n"
+    "console.log(\"Dedup: in=\" + items.length + \" out=\" + unique.length);\n"
+    "return unique.slice(0, 1);"
+)
 
-# Код записи в дедупликацию без require(fs)
-WRITE_DEDUP_CODE = """const item = $input.first().json;
-const title = (item.title || item.text || item.tg_post || "").trim().toLowerCase().substring(0, 80);
-if (title) {
-  const staticData = $getWorkflowStaticData("global");
-  if (!staticData.publishedTitles) staticData.publishedTitles = [];
-  if (!staticData.publishedTitles.includes(title)) {
-    staticData.publishedTitles.push(title);
-  }
-}
-return [$input.first()];"""
+WRITE_DEDUP_CODE = (
+    "const item = $input.first().json;\n"
+    "const title = (item.title || item.text || item.tg_post || \"\").trim().toLowerCase().substring(0, 80);\n"
+    "if (title) {\n"
+    "  const staticData = $getWorkflowStaticData(\"global\");\n"
+    "  if (!staticData.publishedTitles) staticData.publishedTitles = [];\n"
+    "  if (!staticData.publishedTitles.includes(title)) {\n"
+    "    staticData.publishedTitles.push(title);\n"
+    "  }\n"
+    "}\n"
+    "return [$input.first()];"
+)
 
-print("=== FIX ALL FS NODES ===")
-
+print("=== FIX FS NODES ===")
 subprocess.run(["docker","stop","n8n"], capture_output=True, timeout=20)
 time.sleep(3)
 
@@ -57,8 +57,7 @@ row = cur.fetchone()
 
 if not row:
     tg("ERROR: RSS workflow not found!")
-    conn.close()
-    exit(1)
+    conn.close(); exit(1)
 
 wf_id, wf_name, nodes_raw = row
 nodes = json.loads(nodes_raw)
@@ -71,65 +70,48 @@ for n in nodes:
     name = n.get("name","")
     ntype = n.get("type","")
     params = n.get("parameters",{})
-
-    if ntype != "n8n-nodes-base.code":
-        continue
-
+    if ntype != "n8n-nodes-base.code": continue
     code = params.get("jsCode","")
-    print("Code node [" + name + "]: " + code[:80])
-
-    # Любой Code узел с require("fs") или require('fs')
+    print("Code [" + name + "]: has_require=" + str("require(" in code))
     if "require(" in code and "fs" in code:
-        print("  -> HAS require(fs)! Fixing...")
-
-        # Определяем тип узла по содержимому
-        if "readFileSync" in code and "writeFileSync" not in code:
-            # Только чтение — это дедупликация
-            params["jsCode"] = DEDUP_CODE
-            fixes.append("DEDUP: " + name)
-        elif "writeFileSync" in code or "push" in code:
-            # Запись — это write dedup
+        print("  FIXING: " + name)
+        if "writeFileSync" in code:
             params["jsCode"] = WRITE_DEDUP_CODE
             fixes.append("WRITE_DEDUP: " + name)
         else:
-            # По умолчанию — dedup
             params["jsCode"] = DEDUP_CODE
-            fixes.append("DEDUP_DEFAULT: " + name)
-
+            fixes.append("DEDUP: " + name)
         n["parameters"] = params
         changed = True
-        print("  FIXED!")
 
-if changed:
-    cur.execute("UPDATE workflow_entity SET nodes=?, active=1 WHERE id=?",
-               (json.dumps(nodes, ensure_ascii=False), wf_id))
-    print("Saved " + str(len(fixes)) + " fixes")
-else:
-    print("No require(fs) found - checking manually...")
-    # Принудительно исправляем по именам
+# Принудительно фиксируем по именам если не нашли через require
+if not changed:
+    print("require(fs) not found by scan - forcing by name...")
     for n in nodes:
         name = n.get("name","")
         ntype = n.get("type","")
         params = n.get("parameters",{})
         if ntype != "n8n-nodes-base.code": continue
-        if "JavaScript3" in name or "JavaScript4" in name:
-            code = params.get("jsCode","")
-            print("  Force fixing " + name + ": " + code[:60])
-            if "JavaScript4" in name:
-                params["jsCode"] = WRITE_DEDUP_CODE
-            else:
-                params["jsCode"] = DEDUP_CODE
+        if "JavaScript3" in name:
+            params["jsCode"] = DEDUP_CODE
             n["parameters"] = params
-            fixes.append("FORCED: " + name)
+            fixes.append("FORCED DEDUP: " + name)
             changed = True
-    if changed:
-        cur.execute("UPDATE workflow_entity SET nodes=?, active=1 WHERE id=?",
-                   (json.dumps(nodes, ensure_ascii=False), wf_id))
+        elif "JavaScript4" in name:
+            params["jsCode"] = WRITE_DEDUP_CODE
+            n["parameters"] = params
+            fixes.append("FORCED WRITE: " + name)
+            changed = True
+
+if changed:
+    cur.execute("UPDATE workflow_entity SET nodes=?, active=1 WHERE id=?",
+               (json.dumps(nodes, ensure_ascii=False), wf_id))
+    print("Saved: " + str(fixes))
 
 conn.commit()
 conn.close()
 
-# Рестарт n8n
+# Рестарт
 subprocess.run(["docker","start","n8n"], capture_output=True, timeout=20)
 for _ in range(15):
     time.sleep(4)
@@ -139,24 +121,18 @@ for _ in range(15):
         break
     except: pass
 
-# Сброс дедупликации
 os.makedirs("/data", exist_ok=True)
 with open("/data/published_titles.json","w") as f: json.dump([], f)
+time.sleep(2)
 
-# Сбрасываем StaticData RSS workflow через API
-time.sleep(3)
+# Логин и запуск
 jar = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 ld = json.dumps({"emailOrLdapLoginId":"admin@grandvest.ru","password":"Grandvest2026!"}).encode()
+exec_id = None
 try:
     opener.open(urllib.request.Request("http://localhost:5678/rest/login",
         data=ld, headers={"Content-Type":"application/json"}, method="POST"), timeout=10)
-    # Сброс staticData
-    opener.open(urllib.request.Request(
-        "http://localhost:5678/rest/workflows/" + RSS_WF_ID + "/activate",
-        data=b"{}", headers={"Content-Type":"application/json"}, method="POST"), timeout=10)
-    print("Activated")
-    # Запускаем
     run_req = urllib.request.Request(
         "http://localhost:5678/rest/workflows/" + RSS_WF_ID + "/run",
         data=json.dumps({"runData":{},"startNodes":[],"destinationNode":""}).encode(),
@@ -164,16 +140,14 @@ try:
     with opener.open(run_req, timeout=30) as r:
         run_resp = json.loads(r.read())
     exec_id = run_resp.get("data",{}).get("executionId") or run_resp.get("executionId")
-    print("Run started: exec_id=" + str(exec_id))
-    tg(
-        "<b>RSS FIX + RUN</b>\n\n"
-        "<b>Исправлено:</b>\n" + ("\n".join("• " + f for f in fixes) if fixes else "• нет") +
-        "\n\n<b>Запущен:</b> exec_id=" + str(exec_id) +
-        "\nЖди ~90 сек — результат в @grandvest_realty!"
-    )
+    print("RSS started: exec_id=" + str(exec_id))
 except Exception as e:
-    print("API error: " + str(e))
-    tg("<b>RSS FIX DONE</b>\n\nИсправлено:\n" + ("\n".join(fixes) if fixes else "нет") +
-       "\n\nn8n перезапущен. Запусти вручную: Execute workflow")
+    print("Run error: " + str(e)[:100])
 
+tg(
+    "<b>RSS FIX + RUN</b>\n\n"
+    "<b>Исправлено:</b>\n" + ("\n".join("• " + f for f in fixes) if fixes else "нет") +
+    "\n\n<b>Запущен:</b> exec_id=" + str(exec_id) +
+    "\nЖди ~90 сек — результат в @grandvest_realty!"
+)
 print("DONE. fixes=" + str(fixes))
