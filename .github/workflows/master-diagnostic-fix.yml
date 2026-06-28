@@ -13,11 +13,11 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Run master fix via SSH
+      - name: Deep diagnosis via SSH
         env:
           GH_PAT: ${{ secrets.GH_TOKEN }}
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: "5340000158"
         run: |
-          scp -o StrictHostKeyChecking=no scripts/master_fix_v2.py root@85.239.61.157:/root/master_fix_v2.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "GH_PAT=$GH_PAT TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT python3 /root/master_fix_v2.py 2>&1"
+          scp -o StrictHostKeyChecking=no scripts/deep_diagnosis.py root@85.239.61.157:/root/deep_diag.py
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "GH_PAT=$GH_PAT TG_BOT=$TG_BOT TG_CHAT=$TG_CHAT python3 /root/deep_diag.py 2>&1"
