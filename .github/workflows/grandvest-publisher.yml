@@ -17,10 +17,10 @@ on:
         description: "Source name"
         required: false
         default: ""
-      source_date:
-        description: "Source date"
+      parser_name:
+        description: "Parser name"
         required: false
-        default: ""
+        default: "Парсер Telegram"
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -30,10 +30,9 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ADMIN_CHAT: "5340000158"
           MSG: ${{ github.event.inputs.message }}
           IMG: ${{ github.event.inputs.image_url }}
           SOURCE_URL: ${{ github.event.inputs.source_url }}
           SOURCE_NAME: ${{ github.event.inputs.source_name }}
-          SOURCE_DATE: ${{ github.event.inputs.source_date }}
+          PARSER_NAME: ${{ github.event.inputs.parser_name }}
         run: python3 scripts/tg_send.py
