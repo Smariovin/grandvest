@@ -17,6 +17,9 @@ jobs:
       - name: Send daily report
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/daily_report.py root@85.239.61.157:/tmp/daily_report.py
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "BOT_TOKEN=$BOT_TOKEN python3 /tmp/daily_report.py 2>&1"
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/check_balances.py root@85.239.61.157:/tmp/check_balances.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "GH_TOKEN=$GH_TOKEN python3 /tmp/check_balances.py 2>&1"
