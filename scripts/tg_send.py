@@ -35,6 +35,27 @@ if not message:
     print("ERROR: empty message")
     sys.exit(1)
 
+# Если CHAT_ID — это личка (не канал), просто отправляем сообщение и выходим
+CHANNEL_ID = "-1003971323034"
+IS_REPORT = (CHAT_ID == ADMIN_CHAT or CHAT_ID == "5340000158")
+if IS_REPORT:
+    print(f"[REPORT MODE] Sending to personal chat {CHAT_ID}")
+    def send_report(text):
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = json.dumps({"chat_id": CHAT_ID, "text": text[:4096], "parse_mode": "HTML"},
+                         ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(url, data=data,
+              headers={"Content-Type": "application/json; charset=utf-8"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            print(f"Report send error: {e}")
+            return {"ok": False}
+    send_report(message)
+    print("Report sent to personal chat!")
+    sys.exit(0)
+
 msk = (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M")
 print(f"[{msk} МСК] Publishing {len(message)} chars | src={source_name}")
 
