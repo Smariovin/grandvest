@@ -21,6 +21,10 @@ on:
         description: "Parser name"
         required: false
         default: "Парсер Telegram"
+      chat_id:
+        description: "Override chat ID (leave empty for channel)"
+        required: false
+        default: ""
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -29,7 +33,7 @@ jobs:
       - name: Send to Telegram
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHAT_ID: ${{ github.event.inputs.chat_id || secrets.TELEGRAM_CHAT_ID }}
           MSG: ${{ github.event.inputs.message }}
           IMG: ${{ github.event.inputs.image_url }}
           SOURCE_URL: ${{ github.event.inputs.source_url }}
