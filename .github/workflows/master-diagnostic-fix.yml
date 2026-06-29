@@ -4,7 +4,7 @@ on:
 jobs:
   fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Setup SSH
@@ -19,7 +19,7 @@ jobs:
         run: |
           TG_B64=$(echo -n "$TG_BOT" | base64)
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "echo $TG_B64 | base64 -d > /tmp/.tb"
-      - name: Fix all nodes
+      - name: Trace execution
         run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/read_nodes.py root@85.239.61.157:/tmp/fix_all.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/fix_all.py 2>&1"
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/read_nodes.py root@85.239.61.157:/tmp/trace.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/trace.py 2>&1"
