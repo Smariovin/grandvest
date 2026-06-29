@@ -4,7 +4,7 @@ on:
 jobs:
   fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Setup SSH
@@ -13,9 +13,9 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Test RSS from VPS
+      - name: Fix RSS sources and run
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          scp -o StrictHostKeyChecking=no scripts/test_rss_vps.py root@85.239.61.157:/root/test_rss.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /root/test_rss.py 2>&1"
+          scp -o StrictHostKeyChecking=no scripts/fix_rss_sources.py root@85.239.61.157:/root/fix_rss_sources.py
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /root/fix_rss_sources.py 2>&1"
