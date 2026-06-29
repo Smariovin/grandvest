@@ -6,18 +6,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Read nodes
+      - name: Write token
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           TG_B64=$(echo -n "$TG_BOT" | base64)
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "echo $TG_B64 | base64 -d > /tmp/.tb"
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/run_fix.sh root@85.239.61.157:/tmp/run_fix.sh
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "bash /tmp/run_fix.sh 2>&1"
+      - name: Read nodes
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 'printf '"'"'%s'"'"' '"'"'aW1wb3J0IHNxbGl0ZTMsanNvbix1cmxsaWIucmVxdWVzdCx1cmxsaWIucGFyc2Usb3MKREI9Jy9vcHQvbjhuL244bl9kYXRhL2RhdGFiYXNlLnNxbGl0ZScKQk9UPW9wZW4oJy90bXAvLnRiJykucmVhZCgpLnN0cmlwKCkgaWYgb3MucGF0aC5leGlzdHMoJy90bXAvLnRiJykgZWxzZSAnJwpDSEFUPSc1MzQwMDAwMTU4JwpkZWYgdGcobSk6CiAgICBkPXVybGxpYi5wYXJzZS51cmxlbmNvZGUoeydjaGF0X2lkJzpDSEFULCd0ZXh0JzptWzo0MDk2XSwncGFyc2VfbW9kZSc6J0hUTUwnfSkuZW5jb2RlKCkKICAgIHVybGxpYi5yZXF1ZXN0LnVybG9wZW4odXJsbGliLnJlcXVlc3QuUmVxdWVzdCgnaHR0cHM6Ly9hcGkudGVsZWdyYW0ub3JnL2JvdCcrQk9UKycvc2VuZE1lc3NhZ2UnLGRhdGE9ZCxtZXRob2Q9J1BPU1QnKSx0aW1lb3V0PTE1KQpjb25uPXNxbGl0ZTMuY29ubmVjdChEQikKY3VyPWNvbm4uY3Vyc29yKCkKbXNncz1bXQpmb3Igd2ZfaWQsbGFiZWwgaW4gWygnRjI0anZLaVhKSXM0d1JpWicsJ1RHJyksKCdTSVBuVjJtcW1nTXFVa0xiJywnUlNTJyldOgogICAgY3VyLmV4ZWN1dGUoJ1NFTEVDVCBub2RlcyBGUk9NIHdvcmtmbG93X2VudGl0eSBXSEVSRSBpZD0/Jywod2ZfaWQsKSkKICAgIHJvdz1jdXIuZmV0Y2hvbmUoKQogICAgaWYgbm90IHJvdzogY29udGludWUKICAgIG5vZGVzPWpzb24ubG9hZHMocm93WzBdKQogICAgZm9yIG4gaW4gbm9kZXM6CiAgICAgICAgbm09bi5nZXQoJ25hbWUnLCcnKTtudD1uLmdldCgndHlwZScsJycpO3A9bi5nZXQoJ3BhcmFtZXRlcnMnLHt9KQogICAgICAgIGlmIG50PT0nbjhuLW5vZGVzLWJhc2UuY29kZSc6CiAgICAgICAgICAgIG1zZ3MuYXBwZW5kKCdbJytsYWJlbCsnXSBDT0RFICcrbm0rJzpcbicrcC5nZXQoJ2pzQ29kZScsJycpWzoyMDBdKQogICAgICAgIGlmIG50PT0nbjhuLW5vZGVzLWJhc2UuaHR0cFJlcXVlc3QnIGFuZCAnb3BlbnJvdXRlcicgaW4gcC5nZXQoJ3VybCcsJycpLmxvd2VyKCk6CiAgICAgICAgICAgIG1zZ3MuYXBwZW5kKCdbJytsYWJlbCsnXSBPUiAnK25tKyc6XG5iY3Q9JytwLmdldCgnYm9keUNvbnRlbnRUeXBlJywnPycpKydcbicrc3RyKHAuZ2V0KCdqc29uQm9keScsJycpKVs6MjUwXSkKY29ubi5jbG9zZSgpCmZvciBpIGluIHJhbmdlKDAsbGVuKG1zZ3MpLDMpOgogICAgdGcoJzxiPkRVTVA8L2I+XG5cbicrJ1xuLS0tXG4nLmpvaW4obXNnc1tpOmkrM10pKQogICAgaW1wb3J0IHRpbWU7IHRpbWUuc2xlZXAoMSkKcHJpbnQoJ09LJyxsZW4obXNncyksJ25vZGVzJykK'"'"' > /tmp/ms.b64
+python3 -c "import base64; open('"'"'/tmp/ms.py'"'"','"'"'wb'"'"').write(base64.b64decode(open('"'"'/tmp/ms.b64'"'"').read()))"
+python3 /tmp/ms.py
+'
