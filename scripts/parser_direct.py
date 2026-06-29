@@ -16,7 +16,8 @@ LOG_FILE = '/tmp/parse_log.json'
 CHANNELS = [
     'CRERussia', 'officenewsdaily', 'nedvirf', 'arendator_ru',
     'pravonadom1', 'rusipoteka', 'ria_realty', 'Commers_Estate'
-]
+,
+    'propertyinsider']
 
 def now_msk():
     return datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=3)
