@@ -13,9 +13,11 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Restore RSS original
+      - name: Restore RSS
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/restore_rss_original.py root@85.239.61.157:/tmp/restore_rss.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /tmp/restore_rss.py 2>&1"
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            scripts/restore_rss_original.py root@85.239.61.157:/tmp/restore_rss.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            root@85.239.61.157 "TG_BOT=$TG_BOT python3 /tmp/restore_rss.py 2>&1"
