@@ -4,7 +4,7 @@ on:
 jobs:
   fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Setup SSH
         run: |
@@ -12,8 +12,43 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Diagnose RSS sources + reset dedup + run
+      - name: Test RSS from VPS
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /root/rss_diag_full.py 2>&1" || true
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 bash << 'BASH'
+          echo "=== RSS TEST FROM VPS ==="
+          
+          test_url() {
+            NAME=$1; URL=$2
+            CODE=$(curl -s -o /tmp/rss_test.xml -w "%{http_code}" --max-time 10               -H "User-Agent: Mozilla/5.0 (compatible; RSS)" "$URL")
+            ITEMS=$(grep -c "<item>" /tmp/rss_test.xml 2>/dev/null || echo 0)
+            SIZE=$(wc -c < /tmp/rss_test.xml 2>/dev/null || echo 0)
+            echo "$NAME: HTTP $CODE | $ITEMS items | $SIZE bytes"
+            if [ "$CODE" = "200" ] && [ "$ITEMS" -gt 0 ]; then
+              grep -o "<title>[^<]*" /tmp/rss_test.xml | head -3 | sed 's/<title>/  * /'
+            fi
+          }
+          
+          echo "--- Google News RSS ---"
+          test_url "Google: ком.недвижимость" "https://news.google.com/rss/search?q=%D0%BA%D0%BE%D0%BC%D0%BC%D0%B5%D1%80%D1%87%D0%B5%D1%81%D0%BA%D0%B0%D1%8F+%D0%BD%D0%B5%D0%B4%D0%B2%D0%B8%D0%B6%D0%B8%D0%BC%D0%BE%D1%81%D1%82%D1%8C&hl=ru&gl=RU&ceid=RU:ru"
+          test_url "Google: аренда офисов" "https://news.google.com/rss/search?q=%D0%B0%D1%80%D0%B5%D0%BD%D0%B4%D0%B0+%D0%BE%D1%84%D0%B8%D1%81%D0%BE%D0%B2+%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0&hl=ru&gl=RU&ceid=RU:ru"
+          test_url "Google: склады" "https://news.google.com/rss/search?q=%D1%81%D0%BA%D0%BB%D0%B0%D0%B4%D1%8B+%D0%B0%D1%80%D0%B5%D0%BD%D0%B4%D0%B0+%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0&hl=ru&gl=RU&ceid=RU:ru"
+          
+          echo "--- Российские сайты ---"
+          test_url "РИА Недвижимость" "https://realty.ria.ru/export/rss2/index.xml"
+          test_url "Ведомости" "https://www.vedomosti.ru/rss/rubric/realty"
+          test_url "Коммерсант недвижимость" "https://www.kommersant.ru/RSS/section-realty.xml"
+          test_url "RBC Realty" "https://realty.rbc.ru/v1/export/rss/news"
+          test_url "Циан" "https://www.cian.ru/rss/"
+          
+          echo "--- RSSHub (локальный) ---"
+          test_url "RSSHub health" "http://localhost:1200/"
+          test_url "RSSHub Циан" "http://localhost:1200/cian/newbuildings"
+          
+          echo "=== DONE ==="
+          BASH
+          
+          # Отправляем результат в TG
+          RESULT=$(ssh -o StrictHostKeyChecking=no root@85.239.61.157 "cat /tmp/rss_vps_result.txt 2>/dev/null || echo 'no result file'")
+          echo "Test complete"
