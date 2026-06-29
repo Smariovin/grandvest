@@ -6,7 +6,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -19,7 +18,10 @@ jobs:
         run: |
           TG_B64=$(echo -n "$TG_BOT" | base64)
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "echo $TG_B64 | base64 -d > /tmp/.tb"
-      - name: Trace execution
+      - name: Trace
         run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/read_nodes.py root@85.239.61.157:/tmp/trace.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/trace.py 2>&1"
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 'printf '"'"'%s'"'"' '"'"'aW1wb3J0IHNxbGl0ZTMsanNvbix1cmxsaWIucmVxdWVzdCx1cmxsaWIucGFyc2UsaHR0cC5jb29raWVqYXIsb3MKTjhOPSdodHRwOi8vbG9jYWxob3N0OjU2NzgnClRHX1dGPSdGMjRqdktpWEpJczR3UmlaJwp0cnk6IEJPVD1vcGVuKCcvdG1wLy50YicpLnJlYWQoKS5zdHJpcCgpCmV4Y2VwdDogQk9UPScnCkNIQVQ9JzUzNDAwMDAxNTgnCmRlZiB0ZyhtKToKICAgIGlmIG5vdCBCT1Q6IHByaW50KG1bOjMwMF0pOyByZXR1cm4KICAgIGQ9dXJsbGliLnBhcnNlLnVybGVuY29kZSh7J2NoYXRfaWQnOkNIQVQsJ3RleHQnOm1bOjQwOTZdLCdwYXJzZV9tb2RlJzonSFRNTCd9KS5lbmNvZGUoKQogICAgdHJ5OiB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QoJ2h0dHBzOi8vYXBpLnRlbGVncmFtLm9yZy9ib3QnK0JPVCsnL3NlbmRNZXNzYWdlJyxkYXRhPWQsbWV0aG9kPSdQT1NUJyksdGltZW91dD0xNSkKICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZTogcHJpbnQoJ1RHOicsZSkKamFyPWh0dHAuY29va2llamFyLkNvb2tpZUphcigpCm9wZW5lcj11cmxsaWIucmVxdWVzdC5idWlsZF9vcGVuZXIodXJsbGliLnJlcXVlc3QuSFRUUENvb2tpZVByb2Nlc3NvcihqYXIpKQpsZD1qc29uLmR1bXBzKHsnZW1haWxPckxkYXBMb2dpbklkJzonYWRtaW5AZ3JhbmR2ZXN0LnJ1JywncGFzc3dvcmQnOidHcmFuZHZlc3QyMDI2ISd9KS5lbmNvZGUoKQpvcGVuZXIub3Blbih1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KE44TisnL3Jlc3QvbG9naW4nLGRhdGE9bGQsaGVhZGVycz17J0NvbnRlbnQtVHlwZSc6J2FwcGxpY2F0aW9uL2pzb24nfSxtZXRob2Q9J1BPU1QnKSx0aW1lb3V0PTEwKQp3aXRoIG9wZW5lci5vcGVuKE44TisnL3Jlc3QvZXhlY3V0aW9ucz9saW1pdD0xJndvcmtmbG93SWQ9JytUR19XRix0aW1lb3V0PTE1KSBhcyByOgogICAgZWQ9anNvbi5sb2FkcyhyLnJlYWQoKSkKZXhlY3M9ZWQuZ2V0KCdkYXRhJyx7fSkuZ2V0KCdkYXRhJyxlZC5nZXQoJ2RhdGEnLFtdKSkKaWYgbm90IGV4ZWNzOiB0ZygnTm8gZXhlY3V0aW9ucycpOyBleGl0KDApCmV4PWV4ZWNzWzBdCnN0YXR1cz1leC5nZXQoJ3N0YXR1cycsJz8nKQpzdGFydGVkPXN0cihleC5nZXQoJ3N0YXJ0ZWRBdCcsJz8nKSlbOjE2XQpyZD1leC5nZXQoJ2RhdGEnLHt9KS5nZXQoJ3Jlc3VsdERhdGEnLHt9KS5nZXQoJ3J1bkRhdGEnLHt9KQpvcmRlcj1bJ1dlYmhvb2snLCcyLiDQlNC10LTRg9C/0LvQuNC60LDRhtC40Y8g0LLRhdC+0LTRj9GJ0LjRhScsJzEuINCf0LDRgNGB0LjQvdCzIEhUTUwgVGVsZWdyYW0nLAogICAgICAgJ0NsYXVkZSDigJQg0L7RhtC10L3QutCwINC/0L7RgdGC0LAnLCdDb2RlIOKAlCDRhNC40LvRjNGC0YAg0L7RhtC10L3QutC4JywKICAgICAgICc2LiDQmNC30LLQu9C10YfQtdC90LjQtSDRgtC10LrRgdGC0LAg0L/QvtGB0YLQsCcsJ0hUVFAgUmVxdWVzdCDigJQg0LPQtdC90LXRgNCw0YbQuNGPINC/0L7RgdGC0LAnLAogICAgICAgJzguINCf0L7QtNCz0L7RgtC+0LLQutCwINC00LDQvdC90YvRhSDQv9C+0YHRgtCwJywnSFRUUCBSZXF1ZXN0IOKAlCBmYWwuYWknLAogICAgICAgJzkuINCe0YLQv9GA0LDQstC60LAg0LIgVGVsZWdyYW0nLCcxMC4g0JfQsNC/0LjRgdGMINCyINC00LXQtNGD0L/Qu9C40LrQsNGG0LjRjiddCmxpbmVzPVsnPGI+MjE6NTgg0JzQodCaIFRSQUNFPC9iPicsc3RhdHVzKycgQCAnK3N0YXJ0ZWQsJyddCmZvciBubiBpbiBvcmRlcjoKICAgIG5kPXJkLmdldChubikKICAgIGlmIG5kIGlzIE5vbmU6IGxpbmVzLmFwcGVuZCgnICAtJytubls6MjVdKTsgY29udGludWUKICAgIGlmIG5kIGFuZCBuZFswXToKICAgICAgICBpdGVtcz1uZFswXS5nZXQoJ2RhdGEnLHt9KS5nZXQoJ21haW4nLFtbXV0pWzBdCiAgICAgICAgaGFzPWJvb2woaXRlbXMgYW5kIGl0ZW1zWzBdKQogICAgICAgIGVycj1uZFswXS5nZXQoJ2Vycm9yJykKICAgICAgICBpZiBlcnI6IGxpbmVzLmFwcGVuZCgnRVJSICcrbm5bOjI1XSsnOiAnK3N0cihlcnIpWzo1MF0pCiAgICAgICAgZWxpZiBoYXM6CiAgICAgICAgICAgIHMyPWl0ZW1zWzBdLmdldCgnanNvbicse30pCiAgICAgICAgICAgIGluZm89e2Y6c3RyKHMyW2ZdKVs6MzVdIGZvciBmIGluIFsndGV4dCcsJ3Njb3JlJywndGdfcG9zdCcsJ2ltYWdlX3VybCcsJ2Nob2ljZXMnXSBpZiBmIGluIHMyfQogICAgICAgICAgICBsaW5lcy5hcHBlbmQoJ09LICAnK25uWzoyNV0rJzogJytzdHIoaW5mbykpCiAgICAgICAg'"'"' > /tmp/tr.b64
+printf '"'"'%s'"'"' '"'"'ZWxzZTogbGluZXMuYXBwZW5kKCdTVFAgJytubls6MjVdKQp0b3BfZXJyPWV4LmdldCgnZGF0YScse30pLmdldCgncmVzdWx0RGF0YScse30pLmdldCgnZXJyb3InKQppZiB0b3BfZXJyOiBsaW5lcy5hcHBlbmQoJ1RPUEVSUjogJytzdHIodG9wX2VycilbOjgwXSkKdGcoJ1xuJy5qb2luKGxpbmVzKSkKcHJpbnQoJ0RPTkUnKQo='"'"' >> /tmp/tr.b64
+python3 -c "import base64; open('"'"'/tmp/tr.py'"'"','"'"'wb'"'"').write(base64.b64decode(open('"'"'/tmp/tr.b64'"'"').read()))"
+python3 /tmp/tr.py
+'
