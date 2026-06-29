@@ -4,41 +4,16 @@ on:
 jobs:
   fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Emergency n8n restart
+      - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "
-            echo '=== EMERGENCY RESTART ==='
-            chown 1000:1000 /opt/n8n/n8n_data/database.sqlite
-            chmod 644 /opt/n8n/n8n_data/database.sqlite
-            docker ps -a | grep n8n
-            docker start n8n 2>/dev/null || docker restart n8n 2>/dev/null || true
-            sleep 15
-            curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz
-            echo ' <- healthz status'
-            docker ps | grep n8n
-          "
-      - name: Verify and notify
+      - name: Diagnose RSS sources + reset dedup + run
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          sleep 5
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "
-            STATUS=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz)
-            if [ \"\$STATUS\" = \"200\" ]; then
-              curl -s -X POST https://api.telegram.org/bot$TG_BOT/sendMessage \
-                -d chat_id=5340000158 \
-                -d text='✅ n8n восстановлен! http://85.239.61.157:5678 — открывай!' \
-                -d parse_mode=HTML
-            else
-              curl -s -X POST https://api.telegram.org/bot$TG_BOT/sendMessage \
-                -d chat_id=5340000158 \
-                -d text='❌ n8n всё ещё не отвечает. Статус: '\$STATUS \
-                -d parse_mode=HTML
-            fi
-          "
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /root/rss_diag_full.py 2>&1" || true
