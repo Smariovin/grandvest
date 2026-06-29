@@ -1,95 +1,70 @@
 #!/usr/bin/env python3
-"""Guardian v3 — простой и надёжный"""
-import sqlite3, json, subprocess, re, os, urllib.request, urllib.parse, datetime, time
+"""Guardian v4 - watches parser health, triggers if needed"""
+import json, urllib.request, urllib.parse, os, time, datetime
 
-DB = '/opt/n8n/n8n_data/database.sqlite'
-BOT = '8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw'
-MY_CHAT = '5340000158'
 PAT = os.environ.get('GH_PAT', '')
+REPO = 'Smariovin/grandvest'
+BOT = '8672691136:AAHHXmzhwkWoI6mTzrz8L3_DuQfpq7kTTbw'
+CHAT = '5340000158'
 
 def tg(msg):
-    try:
-        url = f'https://api.telegram.org/bot{BOT}/sendMessage'
-        data = urllib.parse.urlencode({'chat_id': MY_CHAT, 'text': msg[:4000], 'parse_mode': 'HTML'}).encode()
-        urllib.request.urlopen(urllib.request.Request(url, data=data, method='POST'), timeout=10)
+    d = urllib.parse.urlencode({'chat_id':CHAT,'text':msg[:4096],'parse_mode':'HTML'}).encode()
+    try: urllib.request.urlopen(urllib.request.Request(
+        'https://api.telegram.org/bot'+BOT+'/sendMessage',data=d,method='POST'),timeout=15)
     except: pass
 
-msk = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=3)
-print(f"Guardian v3 | {msk.strftime('%d.%m.%Y %H:%M')} MSK")
+def gh_get(path):
+    r = urllib.request.Request('https://api.github.com'+path, headers={
+        'Authorization':'token '+PAT, 'Accept':'application/vnd.github.v3+json'})
+    with urllib.request.urlopen(r, timeout=15) as resp: return json.loads(resp.read())
 
-fixes = []
+def gh_dispatch(workflow):
+    r = urllib.request.Request(
+        'https://api.github.com/repos/'+REPO+'/actions/workflows/'+workflow+'/dispatches',
+        data=json.dumps({'ref':'main'}).encode(),
+        headers={'Authorization':'token '+PAT,'Accept':'application/vnd.github.v3+json',
+                 'Content-Type':'application/json'}, method='POST')
+    try:
+        with urllib.request.urlopen(r, timeout=15): return True
+    except: return False
 
-# 1. n8n health
-try:
-    urllib.request.urlopen('http://localhost:5678/healthz', timeout=5)
-    print("n8n: OK")
-except:
-    print("n8n: DOWN — restarting")
-    subprocess.run(['docker', 'restart', 'n8n'], capture_output=True, timeout=40)
-    time.sleep(20)
-    fixes.append("n8n перезапущен")
+print('=== Guardian v4 ===')
+now = datetime.datetime.now(datetime.timezone.utc)
+actions = []
 
-# 2. Читаем SQLite и патчим узел 9
-if not PAT:
-    print("No PAT — skipping node9 patch")
-else:
-    conn = sqlite3.connect(DB)
-    cur = conn.cursor()
-    cur.execute("SELECT id, name, nodes FROM workflow_entity")
+# Проверяем Telegram Parser
+runs = gh_get('/repos/'+REPO+'/actions/runs?per_page=20')
+tg_runs = [r for r in runs['workflow_runs'] if r['name']=='Telegram Parser' and r['status']=='completed']
+
+if tg_runs:
+    last_tg = datetime.datetime.fromisoformat(tg_runs[0]['created_at'].replace('Z','+00:00'))
+    age_min = (now - last_tg).total_seconds() / 60
+    print(f'Last Telegram Parser: {last_tg.strftime("%H:%M")} UTC ({age_min:.0f} min ago)')
     
-    for wf_id, wf_name, nodes_raw in cur.fetchall():
-        try: nodes = json.loads(nodes_raw)
-        except: continue
-        
-        changed = False
-        for n in nodes:
-            name = n.get('name', '')
-            params = n.get('parameters', {})
-            code = params.get('jsCode', params.get('code', ''))
-            
-            # Узел 9 — проверяем токен
-            is_node9 = ('Отправка' in name and 'Telegram' in name) or ('9.' in name and 'Telegram' in name)
-            if is_node9 and 'grandvest-publisher' in code:
-                bad_tokens = [t for t in re.findall(r'ghp_[A-Za-z0-9]{10,}', code) if t != PAT]
-                if bad_tokens:
-                    for bad in bad_tokens:
-                        code = code.replace(bad, PAT)
-                    params['jsCode'] = code
-                    params.pop('code', None)
-                    n['parameters'] = params
-                    changed = True
-                    fixes.append(f"[{wf_name}] Node9 token fixed")
-                    print(f"Fixed bad tokens in node9: {[t[:12] for t in bad_tokens]}")
-        
-        if changed:
-            cur.execute("UPDATE workflow_entity SET nodes=? WHERE id=?",
-                       (json.dumps(nodes, ensure_ascii=False), wf_id))
-    
-    conn.commit()
-    conn.close()
-
-# 3. Dedup файл
-try:
-    with open('/data/published_titles.json') as f:
-        dedup = json.load(f)
-    count = len(dedup)
-    if count > 300:
-        with open('/data/published_titles.json', 'w') as f:
-            json.dump(dedup[-100:], f, ensure_ascii=False)
-        fixes.append(f"Dedup очищен: {count}→100")
-        print(f"Dedup cleaned: {count}→100")
+    # Если > 90 минут без парсера — запускаем
+    if age_min > 90:
+        print(f'WARNING: Parser not run for {age_min:.0f} min! Triggering...')
+        ok = gh_dispatch('telegram-parser.yml')
+        if ok:
+            actions.append(f'Парсер Telegram запущен (не запускался {age_min:.0f} мин)')
+            print('Telegram Parser triggered!')
+        else:
+            actions.append('Не удалось запустить Парсер Telegram')
     else:
-        print(f"Dedup: {count} items OK")
-except FileNotFoundError:
-    os.makedirs('/data', exist_ok=True)
-    with open('/data/published_titles.json', 'w') as f: json.dump([], f)
-    print("Dedup file created")
-except Exception as e:
-    print(f"Dedup error: {e}")
-
-# 4. Отчёт только если были починки
-if fixes:
-    tg(f"✅ <b>Guardian v3</b>\n" + '\n'.join(f"• {f}" for f in fixes) + f"\n\n🕐 {msk.strftime('%H:%M')} МСК")
-    print(f"Fixes: {fixes}")
+        print(f'Telegram Parser OK (last {age_min:.0f} min ago)')
 else:
-    print("All OK — no fixes needed")
+    print('No Telegram Parser runs found')
+
+# Проверяем n8n healthz
+try:
+    urllib.request.urlopen('http://85.239.61.157:5678/healthz', timeout=5)
+    print('n8n: UP')
+except:
+    actions.append('n8n недоступен!')
+    tg('<b>ALERT: n8n недоступен!</b>\nПроверь сервер 85.239.61.157')
+
+# Отправляем уведомление только если были действия
+if actions:
+    tg('<b>Guardian v4</b>\n\n' + '\n'.join('• '+a for a in actions))
+
+print('Done. Actions:', actions)
