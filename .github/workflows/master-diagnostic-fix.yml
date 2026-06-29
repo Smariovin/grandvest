@@ -6,15 +6,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Fix RSS URLs
+      - name: Restore RSS original
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /tmp/url_fix.py 2>&1" || true
-          echo "Exit code: $?"
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/restore_rss_original.py root@85.239.61.157:/tmp/restore_rss.py
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /tmp/restore_rss.py 2>&1"
