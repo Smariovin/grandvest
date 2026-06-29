@@ -12,37 +12,13 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Emergency restart n8n
+      - name: Safe diagnostic
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 '
-            echo "=== EMERGENCY RESTART ==="
-            chown 1000:1000 /opt/n8n/n8n_data/database.sqlite 2>/dev/null || true
-            chmod 644 /opt/n8n/n8n_data/database.sqlite 2>/dev/null || true
-            docker start n8n 2>/dev/null || docker restart n8n 2>/dev/null || true
-            sleep 20
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5678/healthz)
-            echo "Health: $STATUS"
-            docker ps | grep n8n
-          ' || true
-      - name: Verify and notify
-        env:
-          TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: |
-          sleep 10
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 '
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5678/healthz)
-            BOT_TOKEN=$TG_BOT
-            CHAT=5340000158
-            if [ "$STATUS" = "200" ]; then
-              MSG="n8n восстановлен! http://85.239.61.157:5678"
-            else
-              MSG="n8n всё ещё не отвечает. Статус: $STATUS. Пробуем ещё раз..."
-              docker restart n8n
-              sleep 30
-              STATUS2=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5678/healthz)
-              MSG="После второй попытки: $STATUS2"
-            fi
-            curl -s -X POST "https://api.telegram.org/bot$TG_BOT/sendMessage"               -d "chat_id=$CHAT"               -d "text=$MSG" || true
+            printf '%s' 'IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwojIFNBRkUgRElBR05PU1RJQyAtIE5PIGRvY2tlciBzdG9wL3N0YXJ0CmltcG9ydCBzcWxpdGUzLCBqc29uLCB1cmxsaWIucmVxdWVzdCwgdXJsbGliLnBhcnNlLCBvcywgaHR0cC5jb29raWVqYXIKCkRCID0gIi9vcHQvbjhuL244bl9kYXRhL2RhdGFiYXNlLnNxbGl0ZSIKQk9UID0gb3MuZW52aXJvbi5nZXQoIlRHX0JPVCIsICIiKQpDSEFUID0gIjUzNDAwMDAxNTgiCgpkZWYgdGcobXNnKToKICAgIGlmIG5vdCBCT1Q6IHByaW50KG1zZyk7IHJldHVybgogICAgZCA9IHVybGxpYi5wYXJzZS51cmxlbmNvZGUoeyJjaGF0X2lkIjpDSEFULCJ0ZXh0Ijptc2dbOjQwOTZdLCJwYXJzZV9tb2RlIjoiSFRNTCJ9KS5lbmNvZGUoKQogICAgdHJ5OiB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QoCiAgICAgICAgImh0dHBzOi8vYXBpLnRlbGVncmFtLm9yZy9ib3QiK0JPVCsiL3NlbmRNZXNzYWdlIixkYXRhPWQsbWV0aG9kPSJQT1NUIiksdGltZW91dD0xNSkKICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZTogcHJpbnQoIlRHOiIsZSkKCiMgMS4gbjhuIGhlYWx0aAp0cnk6CiAgICB1cmxsaWIucmVxdWVzdC51cmxvcGVuKCJodHRwOi8vbG9jYWxob3N0OjU2NzgvaGVhbHRoeiIsIHRpbWVvdXQ9NSkKICAgIG44bl9vayA9IFRydWUKICAgIHByaW50KCJuOG46IFVQIikKZXhjZXB0OgogICAgbjhuX29rID0gRmFsc2UKICAgIHByaW50KCJuOG46IERPV04iKQoKIyAyLiBTUUxpdGUgLSB3b3JrZmxvd3Mg0LggZXhlY3V0aW9ucwpjb25uID0gc3FsaXRlMy5jb25uZWN0KERCKQpjdXIgPSBjb25uLmN1cnNvcigpCmN1ci5leGVjdXRlKCJTRUxFQ1QgaWQsIG5hbWUsIGFjdGl2ZSBGUk9NIHdvcmtmbG93X2VudGl0eSIpCndvcmtmbG93cyA9IHtyb3dbMF06IChyb3dbMV0sIHJvd1syXSkgZm9yIHJvdyBpbiBjdXIuZmV0Y2hhbGwoKX0Kd2ZfbGluZXMgPSBbKCJPTiIgaWYgYSBlbHNlICJPRkYiKSArICIgIiArIG4gZm9yIGksKG4sYSkgaW4gd29ya2Zsb3dzLml0ZW1zKCldCgpzcWwgPSAiU0VMRUNUIHdvcmtmbG93SWQsIHN0YXR1cywgc3RhcnRlZEF0IEZST00gZXhlY3V0aW9uX2VudGl0eSBPUkRFUiBCWSBzdGFydGVkQXQgREVTQyBMSU1JVCA4IgpjdXIuZXhlY3V0ZShzcWwpCmV4ZWNzID0gY3VyLmZldGNoYWxsKCkKZXhlY19saW5lcyA9IFtdCmZvciB3Zl9pZCwgc3RhdHVzLCBzdGFydGVkIGluIGV4ZWNzOgogICAgbmFtZSA9IHdvcmtmbG93cy5nZXQod2ZfaWQsICgiPyIsKSlbMF1bOjIwXQogICAgZXhlY19saW5lcy5hcHBlbmQoc3RhdHVzICsgIiB8ICIgKyBzdHIoc3RhcnRlZClbOjE2XSArICIgfCAiICsgbmFtZSkKCiMgU3RhdGljRGF0YSDQtNC10LTRg9C/0LAKY3VyLmV4ZWN1dGUoIlNFTEVDVCB3b3JrZmxvd0lkLCB2YWx1ZSBGUk9NIHdvcmtmbG93X3N0YXRpY19kYXRhIFdIRVJFIHR5cGU9J2dsb2JhbCciKQpzZF9yb3dzID0gY3VyLmZldGNoYWxsKCkKZGVkdXBfaW5mbyA9IFtdCmZvciB3Zl9pZCwgdmFsIGluIHNkX3Jvd3M6CiAgICB0cnk6CiAgICAgICAgc2QgPSBqc29uLmxvYWRzKHZhbCkKICAgICAgICBjb3VudCA9IGxlbihzZC5nZXQoInB1Ymxpc2hlZFRpdGxlcyIsIFtdKSkKICAgICAgICBuYW1lID0gd29ya2Zsb3dzLmdldCh3Zl9pZCwgKCI/IiwpKVswXVs6MTVdCiAgICAgICAgZGVkdXBfaW5mby5hcHBlbmQobmFtZSArICI6ICIgKyBzdHIoY291bnQpICsgIiB0aXRsZXMiKQogICAgZXhjZXB0OgogICAgICAgIHBhc3MKCmNvbm4uY2xvc2UoKQoKIyAzLiBBUEkgLSDQsNC60YLQuNCy0L3Ri9C1IHdvcmtmbG93cwpqYXIgPSBodHRwLmNvb2tpZWphci5Db29raWVKYXIoKQpvcGVuZXIgPSB1cmxsaWIucmVxdWVzdC5idWlsZF9vcGVuZXIodXJsbGliLnJlcXVlc3QuSFRUUENvb2tpZVByb2Nlc3NvcihqYXIpKQpsZCA9IGpzb24uZHVtcHMoeyJlbWFpbE9yTGRhcExvZ2luSWQiOiJhZG1pbkBncmFuZHZlc3QucnUiLCJwYXNzd29yZCI6IkdyYW5kdmVzdDIwMjYhIn0pLmVuY29kZSgpCmFwaV93ZnMgPSBbXQp0cnk6CiAgICBvcGVuZXIub3Blbih1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KCJodHRwOi8vbG9jYWxob3N0OjU2NzgvcmVzdC9sb2dpbiIsCiAgICAgICAgZGF0YT1sZCwgaGVhZGVycz17IkNvbnRlbnQtVHlwZSI6ImFwcGxpY2F0aW9uL2pzb24ifSwgbWV0aG9kPSJQT1NUIiksIHRpbWVvdXQ9MTApCiAgICB3aXRoIG9wZW5lci5vcGVuKCJodHRwOi8vbG9jYWxob3N0OjU2' > /tmp/sd.b64
+            printf '%s' 'NzgvcmVzdC93b3JrZmxvd3MiLCB0aW1lb3V0PTEwKSBhcyByOgogICAgICAgIGRhdGEgPSBqc29uLmxvYWRzKHIucmVhZCgpKQogICAgZm9yIHdmIGluIGRhdGEuZ2V0KCJkYXRhIiwgW10pOgogICAgICAgIHN0YXR1cyA9ICJBQ1RJVkUiIGlmIHdmLmdldCgiYWN0aXZlIikgZWxzZSAiSU5BQ1RJVkUiCiAgICAgICAgYXBpX3dmcy5hcHBlbmQoc3RhdHVzICsgIiB8ICIgKyB3Zi5nZXQoIm5hbWUiLCI/IikpCmV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgIGFwaV93ZnMuYXBwZW5kKCJBUEkgZXJyOiAiICsgc3RyKGUpWzo1MF0pCgojIDQuINCi0LXRgdGCIHdlYmhvb2sKdHJ5OgogICAgbmV3cyA9ICLQoNGL0L3QvtC6INC+0YTQuNGB0L3QvtC5INC90LXQtNCy0LjQttC40LzQvtGB0YLQuCDQnNC+0YHQutCy0YsgMjAyNjog0LLQsNC60LDQvdGC0L3QvtGB0YLRjCDRgdC90LjQt9C40LvQsNGB0Ywg0LTQviA3Ljgg0L/RgNC+0YbQtdC90YLQsC4g0KHRgtCw0LLQutC4INCw0YDQtdC90LTRiyDQstGL0YDQvtGB0LvQuCDQtNC+IDQ4INGC0YvRgdGP0Ycg0YDRg9Cx0LvQtdC5INC30LAg0LrQsi7QvCDQsiDQs9C+0LQg0L/QviDQtNCw0L3QvdGL0LwgQ0JSRS4iCiAgICBwYXlsb2FkID0ganNvbi5kdW1wcyh7ImNoYW5uZWwiOiJDUkVSdXNzaWEiLCJodG1sIjonPGRpdiBjbGFzcz0idGdtZV93aWRnZXRfbWVzc2FnZV90ZXh0Ij4nK25ld3MrJzwvZGl2Pjx0aW1lIGRhdGV0aW1lPSIyMDI2LTA2LTI5VDA5OjIwOjAwKzAwOjAwIj4wOToyMDwvdGltZT4nfSkuZW5jb2RlKCJ1dGYtOCIpCiAgICByZXMgPSB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QoCiAgICAgICAgImh0dHA6Ly9sb2NhbGhvc3Q6NTY3OC93ZWJob29rL3RlbGVncmFtLXBhcnNlciIsCiAgICAgICAgZGF0YT1wYXlsb2FkLCBoZWFkZXJzPXsiQ29udGVudC1UeXBlIjoiYXBwbGljYXRpb24vanNvbiJ9KSwgdGltZW91dD0zMCkKICAgIHdlYmhvb2sgPSAiT0sgIiArIHN0cihyZXMuc3RhdHVzKQpleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICB3ZWJob29rID0gIkZBSUw6ICIgKyBzdHIoZSlbOjYwXQpwcmludCgiV2ViaG9vazoiLCB3ZWJob29rKQoKIyDQntGC0YfRkdGCCmxpbmVzID0gWyI8Yj7QlNCY0JDQk9Cd0J7QodCi0JjQmtCQIEdSQU5EVkVTVDwvYj4iLCAiIl0KbGluZXMuYXBwZW5kKCI8Yj5uOG46PC9iPiAiICsgKCJVUCIgaWYgbjhuX29rIGVsc2UgIkRPV04iKSkKbGluZXMuYXBwZW5kKCIiKQpsaW5lcy5hcHBlbmQoIjxiPldvcmtmbG93czo8L2I+IikKbGluZXMgKz0gd2ZfbGluZXMKbGluZXMuYXBwZW5kKCIiKQpsaW5lcy5hcHBlbmQoIjxiPkFQSSDRgdGC0LDRgtGD0YE6PC9iPiIpCmxpbmVzICs9IGFwaV93ZnMKbGluZXMuYXBwZW5kKCIiKQpsaW5lcy5hcHBlbmQoIjxiPkRlZHVwIFN0YXRpY0RhdGE6PC9iPiIpCmxpbmVzICs9IGRlZHVwX2luZm8gaWYgZGVkdXBfaW5mbyBlbHNlIFsi0L/Rg9GB0YLQviJdCmxpbmVzLmFwcGVuZCgiIikKbGluZXMuYXBwZW5kKCI8Yj7Qn9C+0YHQu9C10LTQvdC40LUgZXhlY3V0aW9uczo8L2I+IikKbGluZXMgKz0gZXhlY19saW5lcwpsaW5lcy5hcHBlbmQoIiIpCmxpbmVzLmFwcGVuZCgiPGI+V2ViaG9vayDRgtC10YHRgjo8L2I+ICIgKyB3ZWJob29rKQp0ZygiXG4iLmpvaW4obGluZXMpKQpwcmludCgiRE9ORSIpCg==' >> /tmp/sd.b64
+            python3 -c "import base64; open('/tmp/sd.py','wb').write(base64.b64decode(open('/tmp/sd.b64').read()))"
+            TG_BOT=$TG_BOT python3 /tmp/sd.py 2>&1
           ' || true
