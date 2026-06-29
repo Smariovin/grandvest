@@ -1,7 +1,7 @@
 import sqlite3, json, urllib.request, urllib.parse, http.cookiejar, os, time
 
-N8N = "http://localhost:5678"
-TG_WF = "F24jvKiXJIs4wRiZ"
+DB = "/opt/n8n/n8n_data/database.sqlite"
+RSS_WF = "SIPnV2mqmgMqUkLb"
 try: BOT = open("/tmp/.tb").read().strip()
 except: BOT = ""
 CHAT = "5340000158"
@@ -13,58 +13,107 @@ def tg(msg):
         "https://api.telegram.org/bot"+BOT+"/sendMessage",data=d,method="POST"),timeout=15)
     except Exception as e: print("TG:",e)
 
+# Маппинг переименований
+RENAMES = {
+    "HTTP Request":   "Google News: ком.недвижимость",
+    "HTTP Request1":  "Google News: аренда офисов",
+    "HTTP Request2":  "Google News: склады",
+    "HTTP Request3":  "Google News: торговая недвижимость",
+    "HTTP Request4":  "Google News: девелопмент",
+    "HTTP Request5":  "Google News: инвестиции",
+    "HTTP Request10": "Ведомости RSS",
+    "Code in JavaScript":  "Парсинг XML",
+    "HTTP Request6":  "Claude — оценка новости",
+    "Code in JavaScript1": "Фильтр оценки",
+    "Code in JavaScript3": "Дедупликация",
+    "HTTP Request7":  "Claude — генерация поста",
+    "Code in JavaScript2": "Извлечение поста",
+    "HTTP Request9":  "fal.ai — картинка",
+    "HTTP Request8":  "Отправка в Publisher",
+    "Code in JavaScript4": "Запись в дедупликацию",
+    "Code in JavaScript5": "Отчёт RSS",
+}
+
+conn = sqlite3.connect(DB)
+cur = conn.cursor()
+cur.execute("SELECT id, name, nodes, connections FROM workflow_entity WHERE id=?", (RSS_WF,))
+row = cur.fetchone()
+if not row:
+    tg("ERROR: RSS workflow not found!")
+    exit(1)
+
+wf_id, wf_name, nodes_raw, conns_raw = row
+nodes = json.loads(nodes_raw)
+conns = json.loads(conns_raw) if conns_raw else {}
+
+renamed = []
+# Создаём маппинг старых имён на новые
+old_to_new = {}
+
+for n in nodes:
+    old_name = n.get("name", "")
+    if old_name in RENAMES:
+        new_name = RENAMES[old_name]
+        old_to_new[old_name] = new_name
+        n["name"] = new_name
+        renamed.append(old_name + " → " + new_name)
+        print("Renamed: " + old_name + " → " + new_name)
+
+# Обновляем connections — заменяем старые имена на новые
+new_conns = {}
+for src_name, src_data in conns.items():
+    new_src = old_to_new.get(src_name, src_name)
+    new_outputs = {}
+    if isinstance(src_data, dict):
+        for output_type, outputs in src_data.items():
+            if isinstance(outputs, list):
+                new_output_list = []
+                for output_list in outputs:
+                    if isinstance(output_list, list):
+                        new_items = []
+                        for conn in output_list:
+                            if isinstance(conn, dict) and "node" in conn:
+                                conn["node"] = old_to_new.get(conn["node"], conn["node"])
+                            new_items.append(conn)
+                        new_output_list.append(new_items)
+                    else:
+                        new_output_list.append(output_list)
+                new_outputs[output_type] = new_output_list
+            else:
+                new_outputs[output_type] = outputs
+    new_conns[new_src] = new_outputs
+
+cur.execute(
+    "UPDATE workflow_entity SET nodes=?, connections=? WHERE id=?",
+    (json.dumps(nodes, ensure_ascii=False),
+     json.dumps(new_conns, ensure_ascii=False),
+     wf_id)
+)
+conn.commit()
+conn.close()
+print("Saved " + str(len(renamed)) + " renames")
+
+# Перезагружаем workflow через API
 jar = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 ld = json.dumps({"emailOrLdapLoginId":"admin@grandvest.ru","password":"Grandvest2026!"}).encode()
-opener.open(urllib.request.Request(N8N+"/rest/login",
-    data=ld, headers={"Content-Type":"application/json"}, method="POST"), timeout=10)
+try:
+    opener.open(urllib.request.Request("http://localhost:5678/rest/login",
+        data=ld, headers={"Content-Type":"application/json"}, method="POST"), timeout=10)
+    opener.open(urllib.request.Request(
+        "http://localhost:5678/rest/workflows/"+RSS_WF+"/deactivate",
+        data=b"{}", headers={"Content-Type":"application/json"}, method="POST"), timeout=10)
+    time.sleep(2)
+    opener.open(urllib.request.Request(
+        "http://localhost:5678/rest/workflows/"+RSS_WF+"/activate",
+        data=b"{}", headers={"Content-Type":"application/json"}, method="POST"), timeout=10)
+    print("Workflow reloaded")
+except Exception as e:
+    print("API err:", str(e)[:80])
 
-with opener.open(N8N+"/rest/executions?limit=1&workflowId="+TG_WF, timeout=15) as r:
-    ed = json.loads(r.read())
-execs = ed.get("data",{}).get("data", ed.get("data",[]))
-
-if not execs:
-    tg("Нет executions!")
-else:
-    ex = execs[0]
-    status = ex.get("status","?")
-    started = str(ex.get("startedAt","?"))[:16]
-    rd = ex.get("data",{}).get("resultData",{}).get("runData",{})
-    
-    order = ["Webhook","2. Дедупликация входящих","1. Парсинг HTML Telegram",
-             "Claude — оценка поста","Code — фильтр оценки",
-             "6. Извлечение текста поста","HTTP Request — генерация поста",
-             "8. Подготовка данных поста","HTTP Request — fal.ai",
-             "9. Отправка в Telegram","10. Запись в дедупликацию"]
-    
-    lines = ["<b>21:56 МСК TRACE</b>", status+" @ "+started, ""]
-    for nn in order:
-        nd = rd.get(nn)
-        if nd is None:
-            lines.append("⬜ "+nn[:28])
-            continue
-        if nd and nd[0]:
-            items = nd[0].get("data",{}).get("main",[[]])[0]
-            has = bool(items and items[0])
-            err = nd[0].get("error")
-            if err:
-                lines.append("❌ "+nn[:28]+": "+str(err)[:50])
-            elif has:
-                s2 = items[0].get("json",{})
-                # Показываем ключевые значения
-                info = {}
-                for f in ["text","score","tg_post","image_url","dispatch_ok","choices"]:
-                    if f in s2:
-                        v = s2[f]
-                        info[f] = str(v)[:40] if not isinstance(v,(list,dict)) else f"[{type(v).__name__}]"
-                lines.append("✅ "+nn[:28]+": "+str(info))
-            else:
-                lines.append("🛑 "+nn[:28]+": NO OUTPUT — стоп")
-    
-    top_err = ex.get("data",{}).get("resultData",{}).get("error")
-    if top_err:
-        lines.append("TOP ERR: "+str(top_err)[:80])
-    
-    tg("\n".join(lines))
-
+tg(
+    "<b>RSS УЗЛЫ ПЕРЕИМЕНОВАНЫ</b>\n\n" +
+    "\n".join("• " + r for r in renamed) +
+    "\n\nОбнови страницу n8n — увидишь новые имена!"
+)
 print("DONE")
