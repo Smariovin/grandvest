@@ -6,16 +6,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Fix RSS URLs and run
+      - name: Fix RSS - download and run
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          scp -o StrictHostKeyChecking=no scripts/simple_url_fix.py root@85.239.61.157:/root/simple_url_fix.py
-          ssh -o StrictHostKeyChecking=no root@85.239.61.157 "TG_BOT=$TG_BOT python3 /root/simple_url_fix.py 2>&1"
+          ssh -o StrictHostKeyChecking=no root@85.239.61.157 bash -s << 'REMOTEBASH'
+          curl -sf -H "Authorization: token $GH_TOKEN" \
+            'https://raw.githubusercontent.com/Smariovin/grandvest/main/scripts/simple_url_fix.py' \
+            -o /root/url_fix.py
+          echo 'Download status:' $?
+          TG_BOT=$TG_BOT python3 /root/url_fix.py 2>&1
+          REMOTEBASH
