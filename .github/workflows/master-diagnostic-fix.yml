@@ -21,5 +21,5 @@ jobs:
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "echo $TG_B64 | base64 -d > /tmp/.tb"
       - name: Rename nodes
         run: |
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/read_nodes.py root@85.239.61.157:/tmp/rename.py
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "python3 /tmp/rename.py 2>&1"
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no scripts/run_fix.sh root@85.239.61.157:/tmp/run_fix.sh
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "bash /tmp/run_fix.sh 2>&1"
