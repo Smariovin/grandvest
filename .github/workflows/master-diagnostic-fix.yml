@@ -12,9 +12,19 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 85.239.61.157 >> ~/.ssh/known_hosts
-      - name: Trace via SSH with proper env
+      - name: Write token and trace
         env:
           TG_BOT: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GH_PAT: ${{ secrets.GH_TOKEN }}
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "export TG_BOT=$TG_BOT && export GH_PAT=$GH_PAT && python3 /tmp/fc.py 2>&1"
+          # Передаём токен через base64 чтобы избежать проблем со спецсимволами
+          TG_BOT_B64=$(echo -n "$TG_BOT" | base64)
+          GH_PAT_B64=$(echo -n "$GH_PAT" | base64)
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@85.239.61.157 "
+            echo $TG_BOT_B64 | base64 -d > /tmp/.tgbot
+            echo $GH_PAT_B64 | base64 -d > /tmp/.ghpat
+            export TG_BOT=\$(cat /tmp/.tgbot)
+            export GH_PAT=\$(cat /tmp/.ghpat)
+            python3 /tmp/fc.py 2>&1
+            rm -f /tmp/.tgbot /tmp/.ghpat
+          "
