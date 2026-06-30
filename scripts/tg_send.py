@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Grandvest Publisher v5
-- Публикует пост в канал
+Grandvest Publisher v6
+- Публикует пост в канал (с фото если текст укладывается в лимит подписи,
+  иначе без фото с полным текстом)
 - Верифицирует что пост реально появился
 - Если не появился — диагностирует и повторяет
 - Отчёт в личку с подтверждением или ошибкой
@@ -81,28 +82,38 @@ def tg_admin(text):
 
 # ─── Шаг 1: публикуем пост ───
 def publish(text, img, parse_html=True):
+    """
+    Если есть фото и текст укладывается в лимит подписи Telegram (1024) —
+    публикуем с фото. Иначе публикуем без фото, но с полным текстом
+    (лимит сообщения без фото — 4096 символов).
+    Возвращает (result, photo_sent) — photo_sent отражает РЕАЛЬНЫЙ факт
+    отправки фото, а не просто наличие image_url на входе.
+    """
     pm = "HTML" if parse_html else None
-    if img:
-        payload = {"chat_id": CHAT_ID, "photo": img, "caption": text[:1024]}
+    if img and len(text) <= 1024:
+        payload = {"chat_id": CHAT_ID, "photo": img, "caption": text}
         if pm: payload["parse_mode"] = pm
-        return api("sendPhoto", payload)
+        result = api("sendPhoto", payload)
+        photo_sent = result.get("ok", False)
+        return result, photo_sent
     else:
         payload = {"chat_id": CHAT_ID, "text": text[:4096]}
         if pm: payload["parse_mode"] = pm
-        return api("sendMessage", payload)
+        result = api("sendMessage", payload)
+        return result, False
 
 print("Publishing to channel...")
-result = publish(message, image_url)
+result, photo_sent = publish(message, image_url)
 
 # Если HTML ошибка — повтор без parse_mode
 if not result.get("ok") and "parse" in str(result.get("description","")).lower():
     print("  HTML error, retrying without parse_mode...")
-    result = publish(message, image_url, parse_html=False)
+    result, photo_sent = publish(message, image_url, parse_html=False)
 
 # Если фото не грузится — текст без фото
 if not result.get("ok") and image_url:
     print("  Photo error, retrying as text...")
-    result = publish(message, "", parse_html=False)
+    result, photo_sent = publish(message, "", parse_html=False)
 
 if not result.get("ok"):
     err = result.get("description", "unknown error")
@@ -119,7 +130,7 @@ if not result.get("ok"):
 
 msg_id   = result["result"]["message_id"]
 post_link = f"https://t.me/{CHANNEL_USERNAME}/{msg_id}"
-print(f"Published! msg_id={msg_id} link={post_link}")
+print(f"Published! msg_id={msg_id} link={post_link} photo_sent={photo_sent}")
 
 # ─── Шаг 2: верификация — пост реально есть в канале? ───
 print("Verifying post in channel...")
@@ -140,15 +151,15 @@ def verify_post(message_id, retries=3):
             time.sleep(1)
             api("deleteMessage", {"chat_id": ADMIN_CHAT, "message_id": forwarded_id})
             return True, None
-        
+
         err = r.get("description", "")
         print(f"  Verify attempt {attempt+1}: {err}")
-        
+
         if "message not found" in err.lower() or "invalid" in err.lower():
             return False, err
-        
+
         time.sleep(3)  # ждём и повторяем
-    
+
     return False, "таймаут верификации"
 
 verified, verify_err = verify_post(msg_id)
@@ -162,7 +173,7 @@ log_entry = {
     "post_link":   post_link,
     "msg_id":      msg_id,
     "verified":    verified,
-    "has_image":   bool(image_url),
+    "has_image":   photo_sent,
     "chars":       len(message)
 }
 try:
@@ -187,18 +198,18 @@ if verified:
         f"📡 Парсер: {parser_name or '—'}\n"
         f"📌 Источник: {source_name or '—'}\n"
         + (f"🔗 URL: <a href='{source_url}'>{source_url[:50]}</a>\n" if source_url else "")
-        + f"🖼 Картинка: {'да' if image_url else 'нет'} | 📝 {len(message)} симв\n"
+        + f"🖼 Картинка: {'да' if photo_sent else 'нет'} | 📝 {len(message)} симв\n"
         f"✅ Верификация: пост реально в канале"
     )
     print("SUCCESS: post verified in channel")
 else:
     # Пост опубликован но не верифицирован — пробуем получить через getChatMessage
     print(f"WARNING: verification failed: {verify_err}")
-    
+
     # Дополнительная проверка через getChat
     chat_info = api("getChat", {"chat_id": CHAT_ID})
     last_id_in_channel = chat_info.get("result", {}).get("pinned_message", {}).get("message_id", "?")
-    
+
     tg_admin(
         f"⚠️ <b>ПОСТ ОПУБЛИКОВАН, НО ВЕРИФИКАЦИЯ НЕ УДАЛАСЬ</b>\n\n"
         f"🔗 <a href='{post_link}'>Проверь пост: @{CHANNEL_USERNAME}/{msg_id}</a>\n\n"
