@@ -9,7 +9,7 @@ import os, sys, json, urllib.request, urllib.error
 N8N_URL = os.environ.get("N8N_URL", "http://85.239.61.157:5678")
 API_KEY = os.environ.get("N8N_API_KEY", "")
 
-RSS_WORKFLOW_ID = "SIPnV2mqmgMqUkLb"
+RSS_WORKFLOW_ID = "SIPnV2mqmqMqUkLb"
 TG_WORKFLOW_ID = "F24jvKiXJIs4wRiZ"
 
 if not API_KEY:
