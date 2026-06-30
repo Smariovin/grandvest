@@ -1,0 +1,16 @@
+name: Dump Node Code For Claude
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dump nodes
+        env:
+          N8N_URL: http://85.239.61.157:5678
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+        run: python3 scripts/dump_nodes_for_claude.py
