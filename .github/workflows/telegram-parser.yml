@@ -1,7 +1,7 @@
 name: Telegram Parser
 on:
   schedule:
-    - cron: "1 * * * *"
+    - cron: "1 5-18 * * *"
   workflow_dispatch:
 jobs:
   parse:
