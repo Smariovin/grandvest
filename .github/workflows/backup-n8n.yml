@@ -18,14 +18,16 @@ jobs:
       - name: Backup n8n workflows (read-only)
         env:
           N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
-        run: python3 scripts/backup_n8n.py
+        run: |
+          mkdir -p backups
+          python3 scripts/backup_n8n.py
 
       - name: Commit backup if changed
         run: |
           git config user.name "grandvest-backup-bot"
           git config user.email "backup@grandvest.local"
-          git add -A backups/
-          if git diff --staged --quiet; then
+          git add -A backups/ 2>/dev/null || true
+          if [ -z "$(git status --porcelain -- backups/)" ]; then
             echo "Изменений нет, коммит не нужен"
           else
             git commit -m "chore: daily n8n workflow backup $(date -u +%Y-%m-%d)"
