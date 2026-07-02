@@ -10,13 +10,10 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true
-          fetch-depth: 0
+          token: ${{ secrets.REPO_PUSH_TOKEN }}
 
       - name: Backup n8n workflows (read-only)
         env:
@@ -25,12 +22,9 @@ jobs:
 
       - name: Commit backup if changed
         run: |
-          set -x
           git config user.name "grandvest-backup-bot"
           git config user.email "backup@grandvest.local"
-          git status
           git add -A backups/
-          git status
           if git diff --staged --quiet; then
             echo "Изменений нет, коммит не нужен"
           else
