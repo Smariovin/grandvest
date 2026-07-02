@@ -1,9 +1,0 @@
-name: Autonomous Agent (DISABLED)
-on:
-  workflow_dispatch:
-jobs:
-  agent:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Disabled
-        run: echo "Agent disabled - was causing conflicts"
