@@ -1,0 +1,606 @@
+{
+  "updatedAt": "2026-07-02T19:35:48.034Z",
+  "createdAt": "2026-06-10T17:22:00.500Z",
+  "id": "F24jvKiXJIs4wRiZ",
+  "name": "Парсер Telegram",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\nconst html = item.json.body?.html || '';\nconst channel = item.json.body?.channel || '';\nconst sourceUrl = item.json.body?.source_url || '';\n  \n  // Извлекаем текст - убираем все HTML теги\n  let text = html;\n  \n  // Убираем теги br и p с заменой на пробел\n  text = text.replace(/<br\\s*\\/?>/gi, ' ');\n  text = text.replace(/<\\/p>|<p[^>]*>/gi, ' ');\n  // Убираем ссылки - оставляем текст\n  text = text.replace(/<a[^>]*>([^<]*)<\\/a>/gi, '$1');\n  // Убираем все остальные теги\n  text = text.replace(/<[^>]+>/g, '');\n  // Декодируем HTML entities\n  text = text.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');\n  text = text.replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\").replace(/&nbsp;/g,' ');\n  // Убираем лишние пробелы\n  text = text.replace(/\\s+/g,' ').trim();\n  \n  // Извлекаем дату публикации\n  const timeMatch = html.match(/datetime=\"([^\"]+)\"/);\n  const pubTime = timeMatch ? timeMatch[1] : new Date().toISOString();\n  \n  console.log('Channel: ' + channel + ' | Text length: ' + text.length);\n  console.log('Text preview: ' + text.substring(0, 100));\n  \n  if (text && text.length >= 20) {\n    results.push({\n      json: {\n        text: text,\n        title: text.substring(0, 100),\n        channel: channel,\n        source_url: sourceUrl,\n        pub_time: pubTime\n      }\n    });\n  }\n}\n\nif (results.length === 0) {\n  console.log('WARNING: no text extracted from HTML');\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        368
+      ],
+      "id": "4d905d1c-71c9-4081-9d2e-2f1281335f8c",
+      "name": "1. Парсинг HTML Telegram"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst title = (item.title || item.text || '').trim().toLowerCase().substring(0, 80);\n\nconst now = new Date();\nconst moscowOffset = 3 * 60 * 60 * 1000;\nconst moscowNow = new Date(now.getTime() + moscowOffset);\nconst todayMsk = moscowNow.toISOString().substring(0, 10);\n\nconst staticData = $getWorkflowStaticData('global');\n\n// Сброс списка при смене даты МСК\nif (staticData.publishedDate !== todayMsk) {\n  staticData.published = [];\n  staticData.publishedDate = todayMsk;\n}\nif (!staticData.published) staticData.published = [];\n\n// Если такой заголовок уже публиковался сегодня — блокируем дальше\nif (title && staticData.published.includes(title)) {\n  return [];\n}\n\nreturn [$input.item];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        -80
+      ],
+      "id": "05330fd8-765f-4fc0-8f5f-c0c8e0e3d17d",
+      "name": "2. Дедупликация входящих"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer [REDACTED_OPENROUTER_KEY]"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\": \"anthropic/claude-sonnet-4-5\", \"max_tokens\": 100, \"messages\": [{\"role\": \"system\", \"content\": \"Ты оцениваешь новости для Telegram канала о коммерческой недвижимости Москвы. Оцени релевантность новости по шкале от 1 до 10. Верни ТОЛЬКО валидный JSON без пояснений: {\\\"score\\\": 7, \\\"topic\\\": \\\"офисы\\\"}\"}, {\"role\": \"user\", \"content\": \"={{ $('1. Парсинг HTML Telegram').first().json.text }}\"}]}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        320,
+        400
+      ],
+      "id": "e6ba24d8-2cc6-4b2c-8fc7-d8ebc83d5baa",
+      "name": "Claude — оценка поста"
+    },
+    {
+      "parameters": {
+        "jsCode": "const content = $input.first().json.choices?.[0]?.message?.content || '';\nlet score = 0;\nlet reason = '';\ntry {\n  let cleaned = content.trim().replace(/```(?:json)?\\s*/gi,'').replace(/```/g,'').trim();\n  if (cleaned.startsWith('{')) {\n    const parsed = JSON.parse(cleaned);\n    score = parseInt(parsed.score) || 0;\n    reason = parsed.reason || '';\n  } else {\n    const m = content.match(/\\b([1-9]|10)\\b/);\n    score = m ? parseInt(m[1]) : 0;\n  }\n} catch(e) { score = 0; }\nconsole.log('Score:', score, '| Reason:', reason);\nif (score >= 5) {\n  const src = $('2. Дедупликация входящих').first().json;\n  return [{ json: { ...src, score, score_reason: reason } }];\n}\nconsole.log('FILTERED: score=' + score + ' < 5');\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -80
+      ],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567801",
+      "name": "Code — фильтр оценки"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer [REDACTED_OPENROUTER_KEY]"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\": \"anthropic/claude-sonnet-4-5\", \"max_tokens\": 4500, \"messages\": [{\"role\": \"system\", \"content\": \"Ты - эксперт по рынку недвижимости России с 15-летним опытом. Пишешь посты для Telegram канала агентства Grandvest (Москва).\\n\\nПереписывай новость в формате экспертного поста. У тебя ДВА формата по объёму — выбирай по тому, сколько фактов в новости, но ОБА формата ВСЕГДА включают Комментарий Грандвест и Совет.\\n\\nВАЖНОЕ ПРАВИЛО ДЛЯ ВСЕГО ТЕКСТА: бери из исходной новости только факты, цифры и суть — саму формулировку всегда строй заново, своими словами. Ни одно предложение поста не должно быть скопировано или почти дословно повторено из исходного текста, включая заголовок.\\n\\nНИКОГДА не используй markdown-разметку — ни решётки (#) для заголовков, ни двойные звёздочки (**) для жирного текста. Только обычный текст и эмодзи.\\n\\nФОРМАТ A (короткий, с фото) — для новостей с малым количеством конкретики:\\n📍 ЗАГОЛОВОК 8-12 слов\\n\\nКоротко факты в 2-3 предложения\\n\\n💼 Комментарий Грандвест: 1-2 предложения\\n\\n💡 Совет: 1 практичный совет\\n\\n👉 @Grandvest_bot\\n\\nОБЪЁМ: 700-950 символов.\\n\\nФОРМАТ B (полный, без фото) — для новостей с богатой фактологией:\\n📍 ЗАГОЛОВОК 8-12 слов\\n\\nФАКТЫ: 4-5 предложений с цифрами\\n\\nКОНТЕКСТ: 3-4 предложения\\n\\nВЛИЯНИЕ: 2-3 предложения\\n\\n💼 Комментарий Грандвест:\\n\\n💡 Практический совет:\\n\\n👉 @Grandvest_bot\\n\\nОБЪЁМ: 1800-3600 символов.\\n\\nВАЖНО: используй ЛЮБУЮ доступную информацию. НИКОГДА не пиши текст между 950 и 1800 символов.\\n\\nЗАГОЛОВОК: НИКОГДА не копируй заголовок исходной новости дословно или почти дословно — формулируй свой собственный.\\n\\nРАЗНООБРАЗИЕ ПЕРВОГО ПРЕДЛОЖЕНИЯ (сразу после заголовка): каждый раз выбирай ОДИН из разных способов, ориентируясь на новость: прямое утверждение факта, через цифру, через действие/глагол, через локацию, через сравнение с прошлым периодом, через временной маркер, через тренд, через следствие/итог, через контраст, через прямую цитату (если есть). Не используй один и тот же способ два поста подряд.\\n\\nНЕ называй источник новости (канал, СМИ) по имени нигде в тексте поста — источник указывается отдельно системой.\\n\\nНЕ ПИШИ хештеги вообще — ни в конце, ни где-либо ещё. Хештеги добавляются отдельно автоматически системой после генерации. Если допишешь свои — они задвоятся с системными.\\n\\nОтвечай NOPOST ТОЛЬКО если у новости вообще нет ни заголовка, ни единого факта для зацепки.\\n\\nОтвет должен начинаться СРАЗУ с 📍, либо состоять ровно из одного слова NOPOST — никакого текста до или после.\\n\\nВ конце: IMAGE: [описание на английском, реалистичный офис или склад Москва, без людей, без текста]\"}, {\"role\": \"user\", \"content\": \"={{ 'Перепиши эту новость в формате экспертного поста:\\\\n\\\\nИсточник: ' + ($input.first().json.source || $input.first().json.channel || 'Telegram') + '\\\\n\\\\nЗаголовок: ' + ($input.first().json.title || $input.first().json.text || '') + '\\\\n\\\\nТекст новости:\\\\n' + ($input.first().json.description || $input.first().json.text || $input.first().json.content || $input.first().json.title || '') }}\"}]}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        576,
+        400
+      ],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567802",
+      "name": "HTTP Request — генерация поста"
+    },
+    {
+      "parameters": {
+        "jsCode": "const genNode = $(\"HTTP Request — генерация поста\").first().json;\nconst srcNode = $(\"Code — фильтр оценки\").first().json || {};\n\nconst fullText = genNode.choices?.[0]?.message?.content || '';\n\nif (!fullText || fullText.trim().toUpperCase().startsWith('NOPOST')) {\n  console.log('БЛОКИРОВКА: NOPOST или пустой ответ Claude');\n  return [];\n}\n\nconst imageIndex = fullText.lastIndexOf('IMAGE:');\nlet image_prompt = 'Modern Moscow business center interior, professional real estate photography, luxury office space, natural lighting, no people, 4k';\nlet bodyText = fullText.trim();\nif (imageIndex !== -1) {\n  image_prompt = fullText.substring(imageIndex + 6).replace(/\\*\\*/g, '').trim();\n  bodyText = fullText.substring(0, imageIndex).trim();\n}\n\nconst postStart = bodyText.indexOf('📍');\nif (postStart === -1) {\n  console.log('БЛОКИРОВКА: нет 📍 в ответе Claude, формат нарушен, пост отброшен');\n  return [];\n}\n\nlet tg_post = bodyText.substring(postStart);\ntg_post = tg_post.replace(/\\*\\*/g, '').replace(/^#.*\\n+/, '').trim();\ntg_post = tg_post + '\\n\\n#Грандвест #коммерческаянедвижимость #новостройки #аренда #ипотека';\n\nif (tg_post.length < 300) {\n  console.log('БЛОКИРОВКА: пост слишком короткий (' + tg_post.length + ' симв)');\n  return [];\n}\n\nconst SHORT_LIMIT = 1024 - 68 - 20;\nlet image_url = '';\n\nif (tg_post.length <= SHORT_LIMIT) {\n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'POST',\n      url: 'https://fal.run/fal-ai/flux/schnell',\n      headers: {\n        'Authorization': 'Key [REDACTED_FAL_KEY]',\n        'Content-Type': 'application/json'\n      },\n      body: JSON.stringify({\n        prompt: image_prompt,\n        image_size: 'landscape_16_9',\n        num_inference_steps: 4,\n        num_images: 1,\n        enable_safety_checker: true\n      }),\n      timeout: 20000,\n      family: 4\n    });\n    image_url = response.images?.[0]?.url || '';\n  } catch (e) {\n    console.log('fal.ai error: ' + e.message);\n  }\n}\n\nreturn [{\n  json: {\n    tg_post,\n    image_prompt,\n    image_url,\n    title: srcNode.title || '',\n    source_name: srcNode.channel ? '@' + srcNode.channel : '',\n    source_url: srcNode.source_url || '',\n    score: srcNode.score || 0\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        416
+      ],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567803",
+      "name": "8. Подготовка данных поста"
+    },
+    {
+      "parameters": {
+        "jsCode": "const generated = $input.first().json;\nconst text = generated.choices?.[0]?.message?.content || '';\n\nconst src = $('Code — фильтр оценки').first().json;\n\nif (!text || text.length < 20) {\n  console.log('Extract: empty or too short text');\n  return [];\n}\n\nreturn [{\n  json: {\n    text: text,\n    channel: src.channel || '',\n    source_url: src.source_url || '',\n    time_msk: src.pub_time || src.time_msk || '',\n    score: src.score || 0,\n    score_reason: src.score_reason || ''\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        -96
+      ],
+      "id": "17e283c5-72f8-4af8-a484-bd27b99fb36b",
+      "name": "6. Извлечение текста поста"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst now = new Date();\nconst moscowOffset = 3 * 60 * 60 * 1000;\nconst moscowNow = new Date(now.getTime() + moscowOffset);\nconst todayMsk = moscowNow.toISOString().substring(0, 10);\n\nif (staticData.publishedDate !== todayMsk) {\n  staticData.published = [];\n  staticData.publishedDate = todayMsk;\n}\nif (!staticData.published) staticData.published = [];\n\nconst src = $('6. Извлечение текста поста').first().json;\nconst title = (src.text || '').trim().toLowerCase().substring(0, 80);\n\nif (title && !staticData.published.includes(title)) {\n  staticData.published.push(title);\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        416
+      ],
+      "id": "0f79f734-aa63-486b-b438-0254d73ee26d",
+      "name": "10. Запись в дедупликацию"
+    },
+    {
+      "parameters": {
+        "jsCode": "const postData = $('8. Подготовка данных поста').first().json;\nconst postText = postData.tg_post;\nconst imageUrl = postData.image_url || '';\n\nif (!postText || postText.length < 10) {\n  throw new Error('tg_post пустой');\n}\n\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.github.com/repos/Smariovin/grandvest/actions/workflows/grandvest-publisher.yml/dispatches',\n  headers: {\n    'Authorization': 'token [REDACTED_GITHUB_TOKEN]',\n    'Accept': 'application/vnd.github+json',\n    'Content-Type': 'application/json'\n  },\n  body: JSON.stringify({\n    ref: 'main',\n    inputs: {\n      message: postText,\n      image_url: imageUrl,\n      source_url: postData.source_url || '',\n      source_name: postData.source_name || '',\n      parser_name: 'Парсер Telegram'\n    }\n  })\n});\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -96
+      ],
+      "id": "47443bed-9b1b-4c4a-8b19-5399d38605dd",
+      "name": "9. Отправка в Telegram"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-parser",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -96,
+        -80
+      ],
+      "id": "9e6fa69f-dc1c-49f6-9315-0a17d254bd2b",
+      "name": "Webhook",
+      "webhookId": "7b21b5ab-7c56-48b2-a1e6-f3bc709e3d04"
+    }
+  ],
+  "connections": {
+    "Claude — оценка поста": {
+      "main": [
+        [
+          {
+            "node": "Code — фильтр оценки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code — фильтр оценки": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request — генерация поста",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request — генерация поста": {
+      "main": [
+        [
+          {
+            "node": "6. Извлечение текста поста",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Парсинг HTML Telegram": {
+      "main": [
+        [
+          {
+            "node": "2. Дедупликация входящих",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Дедупликация входящих": {
+      "main": [
+        [
+          {
+            "node": "Claude — оценка поста",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8. Подготовка данных поста": {
+      "main": [
+        [
+          {
+            "node": "9. Отправка в Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Извлечение текста поста": {
+      "main": [
+        [
+          {
+            "node": "8. Подготовка данных поста",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10. Запись в дедупликацию": {
+      "main": [
+        []
+      ]
+    },
+    "9. Отправка в Telegram": {
+      "main": [
+        [
+          {
+            "node": "10. Запись в дедупликацию",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "1. Парсинг HTML Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "global": {
+      "published": [
+        "🏢 первичный рынок недвижимости россии адаптируется к сокращению льготных ипотеч",
+        "🏢 рынок новостроек россии: разрыв между строительством и продажами достигает кр",
+        "🏢 сдк-м становится единственным претендентом на офис банка «открытие» за 1,71 м",
+        "🏢 башня рябов продается через зпиф: новая схема покупки офисов в стройке без ба",
+        "# 🏢 баланс жизни важнее умных штор: что действительно ценят покупатели премиаль"
+      ],
+      "publishedDate": "2026-07-02"
+    },
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": {},
+  "versionId": "6e2f5574-8f12-4dbb-bad3-9e184b3207e4",
+  "activeVersionId": "6e2f5574-8f12-4dbb-bad3-9e184b3207e4",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-06-10T17:22:00.505Z",
+      "createdAt": "2026-06-10T17:22:00.505Z",
+      "role": "workflow:owner",
+      "workflowId": "F24jvKiXJIs4wRiZ",
+      "projectId": "19RPcuWgnn1YDjfN"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-07-02T19:35:51.000Z",
+    "createdAt": "2026-07-02T19:35:43.734Z",
+    "versionId": "6e2f5574-8f12-4dbb-bad3-9e184b3207e4",
+    "workflowId": "F24jvKiXJIs4wRiZ",
+    "nodes": [
+      {
+        "parameters": {
+          "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\nconst html = item.json.body?.html || '';\nconst channel = item.json.body?.channel || '';\nconst sourceUrl = item.json.body?.source_url || '';\n  \n  // Извлекаем текст - убираем все HTML теги\n  let text = html;\n  \n  // Убираем теги br и p с заменой на пробел\n  text = text.replace(/<br\\s*\\/?>/gi, ' ');\n  text = text.replace(/<\\/p>|<p[^>]*>/gi, ' ');\n  // Убираем ссылки - оставляем текст\n  text = text.replace(/<a[^>]*>([^<]*)<\\/a>/gi, '$1');\n  // Убираем все остальные теги\n  text = text.replace(/<[^>]+>/g, '');\n  // Декодируем HTML entities\n  text = text.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');\n  text = text.replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\").replace(/&nbsp;/g,' ');\n  // Убираем лишние пробелы\n  text = text.replace(/\\s+/g,' ').trim();\n  \n  // Извлекаем дату публикации\n  const timeMatch = html.match(/datetime=\"([^\"]+)\"/);\n  const pubTime = timeMatch ? timeMatch[1] : new Date().toISOString();\n  \n  console.log('Channel: ' + channel + ' | Text length: ' + text.length);\n  console.log('Text preview: ' + text.substring(0, 100));\n  \n  if (text && text.length >= 20) {\n    results.push({\n      json: {\n        text: text,\n        title: text.substring(0, 100),\n        channel: channel,\n        source_url: sourceUrl,\n        pub_time: pubTime\n      }\n    });\n  }\n}\n\nif (results.length === 0) {\n  console.log('WARNING: no text extracted from HTML');\n}\n\nreturn results;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          48,
+          368
+        ],
+        "id": "4d905d1c-71c9-4081-9d2e-2f1281335f8c",
+        "name": "1. Парсинг HTML Telegram"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.item.json;\nconst title = (item.title || item.text || '').trim().toLowerCase().substring(0, 80);\n\nconst now = new Date();\nconst moscowOffset = 3 * 60 * 60 * 1000;\nconst moscowNow = new Date(now.getTime() + moscowOffset);\nconst todayMsk = moscowNow.toISOString().substring(0, 10);\n\nconst staticData = $getWorkflowStaticData('global');\n\n// Сброс списка при смене даты МСК\nif (staticData.publishedDate !== todayMsk) {\n  staticData.published = [];\n  staticData.publishedDate = todayMsk;\n}\nif (!staticData.published) staticData.published = [];\n\n// Если такой заголовок уже публиковался сегодня — блокируем дальше\nif (title && staticData.published.includes(title)) {\n  return [];\n}\n\nreturn [$input.item];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          192,
+          -80
+        ],
+        "id": "05330fd8-765f-4fc0-8f5f-c0c8e0e3d17d",
+        "name": "2. Дедупликация входящих"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer [REDACTED_OPENROUTER_KEY]"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"model\": \"anthropic/claude-sonnet-4-5\", \"max_tokens\": 100, \"messages\": [{\"role\": \"system\", \"content\": \"Ты оцениваешь новости для Telegram канала о коммерческой недвижимости Москвы. Оцени релевантность новости по шкале от 1 до 10. Верни ТОЛЬКО валидный JSON без пояснений: {\\\"score\\\": 7, \\\"topic\\\": \\\"офисы\\\"}\"}, {\"role\": \"user\", \"content\": \"={{ $('1. Парсинг HTML Telegram').first().json.text }}\"}]}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          320,
+          400
+        ],
+        "id": "e6ba24d8-2cc6-4b2c-8fc7-d8ebc83d5baa",
+        "name": "Claude — оценка поста"
+      },
+      {
+        "parameters": {
+          "jsCode": "const content = $input.first().json.choices?.[0]?.message?.content || '';\nlet score = 0;\nlet reason = '';\ntry {\n  let cleaned = content.trim().replace(/```(?:json)?\\s*/gi,'').replace(/```/g,'').trim();\n  if (cleaned.startsWith('{')) {\n    const parsed = JSON.parse(cleaned);\n    score = parseInt(parsed.score) || 0;\n    reason = parsed.reason || '';\n  } else {\n    const m = content.match(/\\b([1-9]|10)\\b/);\n    score = m ? parseInt(m[1]) : 0;\n  }\n} catch(e) { score = 0; }\nconsole.log('Score:', score, '| Reason:', reason);\nif (score >= 5) {\n  const src = $('2. Дедупликация входящих').first().json;\n  return [{ json: { ...src, score, score_reason: reason } }];\n}\nconsole.log('FILTERED: score=' + score + ' < 5');\nreturn [];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          448,
+          -80
+        ],
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567801",
+        "name": "Code — фильтр оценки"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer [REDACTED_OPENROUTER_KEY]"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"model\": \"anthropic/claude-sonnet-4-5\", \"max_tokens\": 4500, \"messages\": [{\"role\": \"system\", \"content\": \"Ты - эксперт по рынку недвижимости России с 15-летним опытом. Пишешь посты для Telegram канала агентства Grandvest (Москва).\\n\\nПереписывай новость в формате экспертного поста. У тебя ДВА формата по объёму — выбирай по тому, сколько фактов в новости, но ОБА формата ВСЕГДА включают Комментарий Грандвест и Совет.\\n\\nВАЖНОЕ ПРАВИЛО ДЛЯ ВСЕГО ТЕКСТА: бери из исходной новости только факты, цифры и суть — саму формулировку всегда строй заново, своими словами. Ни одно предложение поста не должно быть скопировано или почти дословно повторено из исходного текста, включая заголовок.\\n\\nНИКОГДА не используй markdown-разметку — ни решётки (#) для заголовков, ни двойные звёздочки (**) для жирного текста. Только обычный текст и эмодзи.\\n\\nФОРМАТ A (короткий, с фото) — для новостей с малым количеством конкретики:\\n📍 ЗАГОЛОВОК 8-12 слов\\n\\nКоротко факты в 2-3 предложения\\n\\n💼 Комментарий Грандвест: 1-2 предложения\\n\\n💡 Совет: 1 практичный совет\\n\\n👉 @Grandvest_bot\\n\\nОБЪЁМ: 700-950 символов.\\n\\nФОРМАТ B (полный, без фото) — для новостей с богатой фактологией:\\n📍 ЗАГОЛОВОК 8-12 слов\\n\\nФАКТЫ: 4-5 предложений с цифрами\\n\\nКОНТЕКСТ: 3-4 предложения\\n\\nВЛИЯНИЕ: 2-3 предложения\\n\\n💼 Комментарий Грандвест:\\n\\n💡 Практический совет:\\n\\n👉 @Grandvest_bot\\n\\nОБЪЁМ: 1800-3600 символов.\\n\\nВАЖНО: используй ЛЮБУЮ доступную информацию. НИКОГДА не пиши текст между 950 и 1800 символов.\\n\\nЗАГОЛОВОК: НИКОГДА не копируй заголовок исходной новости дословно или почти дословно — формулируй свой собственный.\\n\\nРАЗНООБРАЗИЕ ПЕРВОГО ПРЕДЛОЖЕНИЯ (сразу после заголовка): каждый раз выбирай ОДИН из разных способов, ориентируясь на новость: прямое утверждение факта, через цифру, через действие/глагол, через локацию, через сравнение с прошлым периодом, через временной маркер, через тренд, через следствие/итог, через контраст, через прямую цитату (если есть). Не используй один и тот же способ два поста подряд.\\n\\nНЕ называй источник новости (канал, СМИ) по имени нигде в тексте поста — источник указывается отдельно системой.\\n\\nНЕ ПИШИ хештеги вообще — ни в конце, ни где-либо ещё. Хештеги добавляются отдельно автоматически системой после генерации. Если допишешь свои — они задвоятся с системными.\\n\\nОтвечай NOPOST ТОЛЬКО если у новости вообще нет ни заголовка, ни единого факта для зацепки.\\n\\nОтвет должен начинаться СРАЗУ с 📍, либо состоять ровно из одного слова NOPOST — никакого текста до или после.\\n\\nВ конце: IMAGE: [описание на английском, реалистичный офис или склад Москва, без людей, без текста]\"}, {\"role\": \"user\", \"content\": \"={{ 'Перепиши эту новость в формате экспертного поста:\\\\n\\\\nИсточник: ' + ($input.first().json.source || $input.first().json.channel || 'Telegram') + '\\\\n\\\\nЗаголовок: ' + ($input.first().json.title || $input.first().json.text || '') + '\\\\n\\\\nТекст новости:\\\\n' + ($input.first().json.description || $input.first().json.text || $input.first().json.content || $input.first().json.title || '') }}\"}]}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          576,
+          400
+        ],
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567802",
+        "name": "HTTP Request — генерация поста"
+      },
+      {
+        "parameters": {
+          "jsCode": "const genNode = $(\"HTTP Request — генерация поста\").first().json;\nconst srcNode = $(\"Code — фильтр оценки\").first().json || {};\n\nconst fullText = genNode.choices?.[0]?.message?.content || '';\n\nif (!fullText || fullText.trim().toUpperCase().startsWith('NOPOST')) {\n  console.log('БЛОКИРОВКА: NOPOST или пустой ответ Claude');\n  return [];\n}\n\nconst imageIndex = fullText.lastIndexOf('IMAGE:');\nlet image_prompt = 'Modern Moscow business center interior, professional real estate photography, luxury office space, natural lighting, no people, 4k';\nlet bodyText = fullText.trim();\nif (imageIndex !== -1) {\n  image_prompt = fullText.substring(imageIndex + 6).replace(/\\*\\*/g, '').trim();\n  bodyText = fullText.substring(0, imageIndex).trim();\n}\n\nconst postStart = bodyText.indexOf('📍');\nif (postStart === -1) {\n  console.log('БЛОКИРОВКА: нет 📍 в ответе Claude, формат нарушен, пост отброшен');\n  return [];\n}\n\nlet tg_post = bodyText.substring(postStart);\ntg_post = tg_post.replace(/\\*\\*/g, '').replace(/^#.*\\n+/, '').trim();\ntg_post = tg_post + '\\n\\n#Грандвест #коммерческаянедвижимость #новостройки #аренда #ипотека';\n\nif (tg_post.length < 300) {\n  console.log('БЛОКИРОВКА: пост слишком короткий (' + tg_post.length + ' симв)');\n  return [];\n}\n\nconst SHORT_LIMIT = 1024 - 68 - 20;\nlet image_url = '';\n\nif (tg_post.length <= SHORT_LIMIT) {\n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'POST',\n      url: 'https://fal.run/fal-ai/flux/schnell',\n      headers: {\n        'Authorization': 'Key [REDACTED_FAL_KEY]',\n        'Content-Type': 'application/json'\n      },\n      body: JSON.stringify({\n        prompt: image_prompt,\n        image_size: 'landscape_16_9',\n        num_inference_steps: 4,\n        num_images: 1,\n        enable_safety_checker: true\n      }),\n      timeout: 20000,\n      family: 4\n    });\n    image_url = response.images?.[0]?.url || '';\n  } catch (e) {\n    console.log('fal.ai error: ' + e.message);\n  }\n}\n\nreturn [{\n  json: {\n    tg_post,\n    image_prompt,\n    image_url,\n    title: srcNode.title || '',\n    source_name: srcNode.channel ? '@' + srcNode.channel : '',\n    source_url: srcNode.source_url || '',\n    score: srcNode.score || 0\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          880,
+          416
+        ],
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567803",
+        "name": "8. Подготовка данных поста"
+      },
+      {
+        "parameters": {
+          "jsCode": "const generated = $input.first().json;\nconst text = generated.choices?.[0]?.message?.content || '';\n\nconst src = $('Code — фильтр оценки').first().json;\n\nif (!text || text.length < 20) {\n  console.log('Extract: empty or too short text');\n  return [];\n}\n\nreturn [{\n  json: {\n    text: text,\n    channel: src.channel || '',\n    source_url: src.source_url || '',\n    time_msk: src.pub_time || src.time_msk || '',\n    score: src.score || 0,\n    score_reason: src.score_reason || ''\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          736,
+          -96
+        ],
+        "id": "17e283c5-72f8-4af8-a484-bd27b99fb36b",
+        "name": "6. Извлечение текста поста"
+      },
+      {
+        "parameters": {
+          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst now = new Date();\nconst moscowOffset = 3 * 60 * 60 * 1000;\nconst moscowNow = new Date(now.getTime() + moscowOffset);\nconst todayMsk = moscowNow.toISOString().substring(0, 10);\n\nif (staticData.publishedDate !== todayMsk) {\n  staticData.published = [];\n  staticData.publishedDate = todayMsk;\n}\nif (!staticData.published) staticData.published = [];\n\nconst src = $('6. Извлечение текста поста').first().json;\nconst title = (src.text || '').trim().toLowerCase().substring(0, 80);\n\nif (title && !staticData.published.includes(title)) {\n  staticData.published.push(title);\n}\n\nreturn $input.all();"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1168,
+          416
+        ],
+        "id": "0f79f734-aa63-486b-b438-0254d73ee26d",
+        "name": "10. Запись в дедупликацию"
+      },
+      {
+        "parameters": {
+          "jsCode": "const postData = $('8. Подготовка данных поста').first().json;\nconst postText = postData.tg_post;\nconst imageUrl = postData.image_url || '';\n\nif (!postText || postText.length < 10) {\n  throw new Error('tg_post пустой');\n}\n\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.github.com/repos/Smariovin/grandvest/actions/workflows/grandvest-publisher.yml/dispatches',\n  headers: {\n    'Authorization': 'token [REDACTED_GITHUB_TOKEN]',\n    'Accept': 'application/vnd.github+json',\n    'Content-Type': 'application/json'\n  },\n  body: JSON.stringify({\n    ref: 'main',\n    inputs: {\n      message: postText,\n      image_url: imageUrl,\n      source_url: postData.source_url || '',\n      source_name: postData.source_name || '',\n      parser_name: 'Парсер Telegram'\n    }\n  })\n});\nreturn [{ json: { ok: true } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1024,
+          -96
+        ],
+        "id": "47443bed-9b1b-4c4a-8b19-5399d38605dd",
+        "name": "9. Отправка в Telegram"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "telegram-parser",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -96,
+          -80
+        ],
+        "id": "9e6fa69f-dc1c-49f6-9315-0a17d254bd2b",
+        "name": "Webhook",
+        "webhookId": "7b21b5ab-7c56-48b2-a1e6-f3bc709e3d04"
+      }
+    ],
+    "connections": {
+      "Claude — оценка поста": {
+        "main": [
+          [
+            {
+              "node": "Code — фильтр оценки",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code — фильтр оценки": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request — генерация поста",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request — генерация поста": {
+        "main": [
+          [
+            {
+              "node": "6. Извлечение текста поста",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "1. Парсинг HTML Telegram": {
+        "main": [
+          [
+            {
+              "node": "2. Дедупликация входящих",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "2. Дедупликация входящих": {
+        "main": [
+          [
+            {
+              "node": "Claude — оценка поста",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "8. Подготовка данных поста": {
+        "main": [
+          [
+            {
+              "node": "9. Отправка в Telegram",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "6. Извлечение текста поста": {
+        "main": [
+          [
+            {
+              "node": "8. Подготовка данных поста",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "10. Запись в дедупликацию": {
+        "main": [
+          []
+        ]
+      },
+      "9. Отправка в Telegram": {
+        "main": [
+          [
+            {
+              "node": "10. Запись в дедупликацию",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "1. Парсинг HTML Telegram",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Admin Grandvest",
+    "name": "Version 6e2f5574",
+    "description": "",
+    "autosaved": true
+  },
+  "tags": []
+}
