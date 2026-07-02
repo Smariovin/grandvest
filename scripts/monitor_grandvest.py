@@ -112,11 +112,15 @@ def main():
             errors = []
 
         last_seen_error = wf_state.get("last_error_id")
+        is_first_run = last_seen_error is None
         new_errors = []
-        for ex in errors:
-            if str(ex.get("id")) == str(last_seen_error):
-                break
-            new_errors.append(ex)
+        if not is_first_run:
+            for ex in errors:
+                if str(ex.get("id")) == str(last_seen_error):
+                    break
+                new_errors.append(ex)
+        if is_first_run and errors:
+            print(f"{label}: первая проверка, запоминаю базовую точку без тревоги")
         if new_errors:
             problems.append(
                 f"🔴 {label}: новых ошибок выполнения — {len(new_errors)}"
