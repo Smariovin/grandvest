@@ -131,11 +131,18 @@ def send_to_n8n(channel, post):
 # ═══════════════════════════
 msk = now_msk()
 h, m = msk.hour, msk.minute
-period_to   = msk.replace(minute=0, second=0, microsecond=0)
-period_from = period_to - datetime.timedelta(hours=1) + datetime.timedelta(minutes=1)
-period_str  = f'{period_from.strftime("%H:%M")}–{period_to.strftime("%H:%M")}'
 IS_WORK   = 8 <= h < 21
 IS_MORNING = h == 8 and m < 15
+
+if IS_MORNING:
+    # Утренний запуск (08:0x) — собираем всю ночь целиком, как в RSS
+    period_to   = msk.replace(hour=8, minute=0, second=0, microsecond=0)
+    period_from = (msk - datetime.timedelta(days=1)).replace(hour=21, minute=1, second=0, microsecond=0)
+else:
+    period_to   = msk.replace(minute=0, second=0, microsecond=0)
+    period_from = period_to - datetime.timedelta(hours=1) + datetime.timedelta(minutes=1)
+
+period_str  = f'{period_from.strftime("%H:%M")}–{period_to.strftime("%H:%M")}'
 
 print(f"=== Parser v7 | {msk.strftime('%d.%m.%Y %H:%M')} МСК | {period_str} ===")
 print(f"Running on GitHub Actions (external IP — no RU blocking)")
