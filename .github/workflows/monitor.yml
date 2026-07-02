@@ -1,0 +1,36 @@
+name: Grandvest Monitor
+
+on:
+  schedule:
+    # каждый час, круглосуточно (лёгкие read-only проверки, безопасно)
+    - cron: "15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run monitoring checks (read-only)
+        env:
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+          REPO_PUSH_TOKEN: ${{ secrets.REPO_PUSH_TOKEN }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+        run: python3 scripts/monitor_grandvest.py
+
+      - name: Save monitor state
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_PUSH_TOKEN }}
+        run: |
+          git config user.name "grandvest-monitor-bot"
+          git config user.email "monitor@grandvest.local"
+          git remote set-url origin https://x-access-token:${PUSH_TOKEN}@github.com/Smariovin/grandvest.git
+          git add -A monitor/ 2>/dev/null || true
+          if [ -n "$(git status --porcelain -- monitor/)" ]; then
+            git commit -m "chore: update monitor state"
+            git push origin HEAD:main
+          else
+            echo "Состояние не изменилось"
+          fi
