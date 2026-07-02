@@ -1,0 +1,33 @@
+name: N8N Workflow Backup
+
+on:
+  schedule:
+    # 00:00 UTC = 03:00 МСК, тихое время, оба парсера не работают
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Backup n8n workflows (read-only)
+        env:
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+        run: python3 scripts/backup_n8n.py
+
+      - name: Commit backup if changed
+        run: |
+          git config user.name "grandvest-backup-bot"
+          git config user.email "backup@grandvest.local"
+          git add backups/
+          if git diff --staged --quiet; then
+            echo "Изменений нет, коммит не нужен"
+          else
+            git commit -m "chore: daily n8n workflow backup $(date -u +%Y-%m-%d)"
+            git push
+          fi
