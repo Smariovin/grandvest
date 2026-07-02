@@ -11,28 +11,27 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.REPO_PUSH_TOKEN }}
 
       - name: Backup n8n workflows (read-only)
         env:
           N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
         run: |
           mkdir -p backups
-          echo "=== CWD ===" > debug_output.log
-          pwd >> debug_output.log
-          echo "=== Running backup script ===" >> debug_output.log
-          python3 scripts/backup_n8n.py >> debug_output.log 2>&1
-          echo "=== Python exit code: $? ===" >> debug_output.log
-          echo "=== ls backups/ ===" >> debug_output.log
-          ls -la backups/ >> debug_output.log 2>&1
+          python3 scripts/backup_n8n.py
 
-      - name: Always commit debug log
-        if: always()
+      - name: Commit and push backup
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_PUSH_TOKEN }}
         run: |
           git config user.name "grandvest-backup-bot"
           git config user.email "backup@grandvest.local"
-          git add -f debug_output.log
+          git remote set-url origin https://x-access-token:${PUSH_TOKEN}@github.com/Smariovin/grandvest.git
           git add -A backups/ 2>/dev/null || true
-          git commit -m "debug: backup diagnostic log" || echo "nothing to commit"
-          git push origin HEAD:main || echo "push failed"
+          git status --porcelain -- backups/
+          if [ -n "$(git status --porcelain -- backups/)" ]; then
+            git commit -m "chore: daily n8n workflow backup $(date -u +%Y-%m-%d)"
+            git push origin HEAD:main
+            echo "PUSHED"
+          else
+            echo "NOTHING_TO_COMMIT"
+          fi
